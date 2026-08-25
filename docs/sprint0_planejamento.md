@@ -12,6 +12,11 @@ As tarefas do projeto foram desdobradas em Histórias de Usuário (User Stories)
 | **5 (Média)** | US05 | **Como** gestor de segurança pública,  visualizar as zonas de alto risco em um dashboard interativo, para alocar viaturas e recursos antecipadamente. | Aplicação rodando em Streamlit; Mapas interativos funcionais. |
 | **6 (Baixa)** | US06 | **Como** desenvolvedor,  documentar o repositório completo e os resultados, para garantir a reprodutibilidade científica do projeto. | `README.md` atualizado com o passo a passo de instalação e uso do MVP. |
 
+## 🎯 Casos de Uso Principais (Sprint 1)
+* **UC01 - Ingerir e Limpar Dados:** O cientista de dados faz o upload dos datasets no Google Colab, e o sistema processa a higienização (tratamento de nulos e padronização) para gerar um dataframe único.
+* **UC02 - Treinar Modelo Preditivo:** O cientista de dados seleciona as features (idade, região, histórico) e o algoritmo processa o treinamento, retornando métricas de precisão (Acurácia, F1-Score).
+* **UC03 - Visualizar Zonas de Risco:** O gestor público acessa o Dashboard, filtra por município ou estado, e o sistema exibe um mapa de calor apontando as áreas com maior probabilidade de escalada da violência.
+
 ---
 
 ## 📊 Quadro Kanban (Status: Sprint 1)
