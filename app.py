@@ -2,7 +2,6 @@ import streamlit as st
 import joblib
 import numpy as np
 import pandas as pd
-import unicodedata
 
 # 1. Configuração da Página
 
@@ -37,16 +36,7 @@ st.subheader("📊 Entrada de Variáveis Preditivas")
 
 col1, col2 = st.columns(2)
 with col1:
-    municipios_originais = list(le_mun.classes_)
-    municipios_exibicao = [
-        ''.join(
-            c for c in unicodedata.normalize('NFD', str(m))
-            if unicodedata.category(c) != 'Mn'
-        ).upper()
-        for m in municipios_originais
-    ]
-    municipio_exibicao = st.selectbox("Município Alvo:", municipios_exibicao)
-    municipio_modelo = municipios_originais[municipios_exibicao.index(municipio_exibicao)]
+    municipio = st.selectbox("Município Alvo:", le_mun.classes_)
 with col2:
     mesoregiao = st.selectbox("Mesorregião de Pertencimento:", le_meso.classes_)
 
@@ -58,7 +48,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
         # Transformando entradas textuais em numéricas
-        mun_cod = le_mun.transform([municipio_modelo])[0]
+        mun_cod = le_mun.transform([municipio])[0]
         meso_cod = le_meso.transform([mesoregiao])[0]
         
         # Montando array e padronizando
@@ -76,10 +66,10 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         res_col1, res_col2 = st.columns([3, 2])
         with res_col1:
             if predicao == 1:
-                st.error(f"**ALERTA PREVENTIVO PARA {municipio_exibicao}** 📈")
+                st.error(f"**ALERTA PREVENTIVO PARA {municipio.upper()}** 📈")
                 st.write("O algoritmo estima uma **TENDÊNCIA DE ALTA** nas ocorrências de violência doméstica para o próximo mês. Recomenda-se alertar as redes de proteção locais e patrulhas preventivas da PM-SC.")
             else:
-                st.success(f"**CENÁRIO ESTÁVEL PARA {municipio_exibicao}** 📉")
+                st.success(f"**CENÁRIO ESTÁVEL PARA {municipio.upper()}** 📉")
                 st.write("O algoritmo estima que as ocorrências se manterão **estáveis ou sofrerão redução** no próximo mês. Manter os protocolos normais de atendimento.")
                 
         with res_col2:
@@ -106,23 +96,25 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         try:
             @st.cache_data
             def carregar_historico():
-                return pd.read_csv('data/base_modelo_violencia_domestica_sc.csv') 
+                return pd.read_csv('dados.csv') 
                 
             df_historico = carregar_historico()
 
-            # ATENÇÃO: Altere 'Municipio' para o nome exato da coluna de municípios no seu CSV
-            df_mun = df_historico[df_historico['municipio'] == municipio_exibicao]
+            # Deteta automaticamente a coluna correspondente ao município
+            coluna_mun = [c for c in df_historico.columns if 'municip' in c.lower()][0]
+            df_mun = df_historico[df_historico[coluna_mun] == municipio]
 
             if not df_mun.empty:
-                st.info(f"Ocorrências históricas registradas na base de dados para {municipio_exibicao}.")
+                st.info(f"Ocorrências históricas registadas na base de dados para {municipio}.")
                 
-                # ATENÇÃO: Altere 'Mes' e 'Ocorrencias' para as colunas exatas do seu CSV
-                df_grafico = df_mun[['Mes', 'Ocorrencias']].set_index('Mes')
-                st.line_chart(df_grafico)
+                # Exibe as colunas detetadas para validação
+                st.write("Colunas detetadas no CSV:", list(df_historico.columns))
+                
+                # Plota o gráfico com base nas colunas numéricas disponíveis
+                df_grafico = df_mun.set_index(df_historico.columns[1])
+                st.line_chart(df_grafico.select_dtypes(include=[np.number]))
             else:
-                st.warning(f"Não foram encontrados registros históricos para {municipio_exibicao} na base de dados.")
+                st.warning(f"Não foram encontrados registos históricos para {municipio} na base de dados.")
 
-        except FileNotFoundError:
-            st.warning("⚠️️ Arquivo CSV de dados históricos não encontrado no repositório. O gráfico não pôde ser gerado.")
         except Exception as e:
             st.error(f"Erro ao tentar ler o dataset: {e}")
