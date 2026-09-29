@@ -94,10 +94,9 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         st.subheader("📈 Contexto Histórico Local")
         
         try:
-            # ATENÇÃO: Altere 'dados.csv' para o nome exato do arquivo que você enviou ao GitHub
             @st.cache_data
             def carregar_historico():
-                return pd.read_csv('dados.csv') 
+                return pd.read_csv('base_modelo_violencia_domestica_sc.csv') 
                 
             df_historico = carregar_historico()
 
