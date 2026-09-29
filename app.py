@@ -101,7 +101,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             df_historico = carregar_historico()
 
             # ATENÇÃO: Altere 'Municipio' para o nome exato da coluna de municípios no seu CSV
-            df_mun = df_historico[df_historico['Municipio'] == municipio]
+            df_mun = df_historico[df_historico['municipio'] == municipio]
 
             if not df_mun.empty:
                 st.info(f"Ocorrências históricas registradas na base de dados para {municipio}.")
