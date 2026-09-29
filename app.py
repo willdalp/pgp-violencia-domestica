@@ -96,7 +96,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         try:
             @st.cache_data
             def carregar_historico():
-                return pd.read_csv('base_modelo_violencia_domestica_sc.csv') 
+                return pd.read_csv('data/base_modelo_violencia_domestica_sc.csv') 
                 
             df_historico = carregar_historico()
 
