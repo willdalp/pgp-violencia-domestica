@@ -15,11 +15,10 @@ Este MVP utiliza **Machine Learning (Random Forest)** para prever a tendência d
 ocorrências de violência doméstica nos municípios de Santa Catarina para o mês subsequente.
 """)
 
-# Função auxiliar para remover acentos e cedilha, padronizando a busca
 def normalize_text(text):
     if not isinstance(text, str):
         return text
-    return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
+    return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII').strip().upper()
 
 # 2. Carregamento dos Modelos e da Base de Dados (Cache)
 @st.cache_resource
@@ -28,14 +27,12 @@ def load_models():
     le_mun = joblib.load('models/le_mun.joblib')
     le_meso = joblib.load('models/le_meso.joblib')
     scaler = joblib.load('models/scaler.joblib')
-    
-    # Prepara o explicador SHAP
     explainer = shap.TreeExplainer(rf_model)
     return rf_model, le_mun, le_meso, scaler, explainer
 
 @st.cache_data
 def load_data():
-    return pd.read_csv('data/base_modelo_violencia_domestica_sc.csv')
+    return pd.read_csv('base_modelo_violencia_domestica_sc.csv')
 
 try:
     rf_model, le_mun, le_meso, scaler, explainer = load_models()
@@ -44,26 +41,77 @@ except Exception as e:
     st.error(f"Erro de infraestrutura ou carregamento de arquivos: Detalhes: {e}")
     st.stop()
 
+# --- MAPEAMENTO OFICIAL IBGE: MUNICÍPIOS DE SC -> MESORREGIÕES ---
+MAPA_MESORREGIOES = {
+    "Grande Florianópolis": [
+        "AGUAS MORNAS", "ALFREDO WAGNER", "ANGELINA", "ANITAPOLIS", "ANTONIO CARLOS",
+        "BIGUACU", "CANELINHA", "FLORIANOPOLIS", "GAROPABA", "GOVERNADOR CELSO RAMOS",
+        "MAJOR GERCINO", "NOVA TRENTO", "PALHOCA", "PAULO LOPES", "RANCHO QUEIMADO",
+        "SANTO AMARO DA IMPERATRIZ", "SAO BONIFACIO", "SAO JOSE", "SAO PEDRO DE ALCANTARA",
+        "TIJUCAS"
+    ],
+    "Norte Catarinense": [
+        "ARAUQUARI", "BALNEARIO BARRA DO SUL", "BELA VISTA DO TOLDO", "CAMPO ALEGRE",
+        "CANOINHAS", "CORUPA", "GARUVA", "IRINEOPOLIS", "ITAIOPOLIS", "ITARARE",
+        "JARAGUA DO SUL", "JOINVILLE", "MAFRA", "MAJOR VIEIRA", "MASSARANDUBA",
+        "MONTE CASTELO", "PAPANDUVA", "PORTO UNIAO", "RIO NEGRINHO", "SCHROEDER",
+        "SAO BENTO DO SUL", "SAO FRANCISCO DO SUL", "SAO JOAO DO ITAPERIU", "TRES BARRAS"
+    ],
+    "Serrana": [
+        "ABDON BATISTA", "ANITA GARIBALDI", "BOM JARDIM DA SERRA", "BOM RETIRO",
+        "CAMPO BELO DO SUL", "CAPAO ALTO", "CELSO RAMOS", "CORREIA PINTO", "CURITIBANOS",
+        "FREI ROGERIO", "LAGES", "OTACILIO COSTA", "PAINEL", "PALMEIRA", "PONTE ALTA",
+        "PONTE ALTA DO NORTE", "RIO RUFINO", "SANTA CECILIA", "SAO CRISTOVAO DO SUL",
+        "SAO JOAQUIM", "SAO JOSE DO CERRITO", "URUBICI", "URUPEMA", "VARGEM", "VARGEM BONITA"
+    ],
+    "Sul Catarinense": [
+        "ARARANGUA", "BALNEARIO ARROIO DO SILVA", "BALNEARIO GAIVOTA", "BALNEARIO RINCAO",
+        "BRACO DO NORTE", "CAPIVARI DE BAIXO", "COCAL DO SUL", "CRICIUMA", "ERMO",
+        "FORQUILHINHA", "GRAVATAL", "ICARA", "IMARUI", "IMBITUBA", "JACINTO MACHADO",
+        "JAGUARUNA", "LAGUNA", "LAURO MULLER", "MARACAJA", "MELEIRO", "MORRO DA FUMACA",
+        "MORRO GRANDE", "NOVA VENEZA", "ORLEANS", "PASSO DE TORRES", "PEDRAS GRANDES",
+        "PESCARIA BRAVA", "PRAIA GRANDE", "SANGAO", "SANTA ROSA DO SUL", "SAO LUDGERO",
+        "SAO MARTINHO", "SOMBRIO", "TREVISO", "TREZE DE MAIO", "TUBARAO", "TURVO", "URUSSANGA"
+    ],
+    "Vale do Itajaí": [
+        "AGROLANDIA", "AGRONOMICA", "APIUNA", "ATALANTA", "AURORA", "BALNEARIO CAMBORIU",
+        "BALNEARIO PICARRAS", "BLUMENAU", "BOTUVERA", "BRACO DO TROMBETO", "BRACO DO TROMBETAS",
+        "BRUSQUE", "CAMBORIU", "CHAPADAO DO LAGEADO", "DONA EMMA", "GASPAR", "IBIRAMA",
+        "ILHOTA", "INDAIAL", "ITAJAI", "ITAPEMA", "ITUPORANGA", "JOSE BOITEUX", "LAURENTINO",
+        "LONTRAS", "LUIS ALVES", "MIRIM DOCE", "NAVEGANTES", "PENHA", "PETROLANDIA",
+        "POUSO REDONDO", "PRESIDENTE GETULIO", "PRESIDENTE NEREU", "RIO DO CAMPO",
+        "RIO DO OESTE", "RIO DO SUL", "RIO DOS CEDROS", "RODEIO", "SALETE", "SANTA TEREZINHA",
+        "TAIO", "TROMBUDO CENTRAL", "VIDAL RAMOS", "VITOR MEIRELES", "WITMARSUM"
+    ]
+}
+
+def obter_mesoregiao(municipio_str):
+    mun_norm = normalize_text(municipio_str)
+    for regiao, municipios in MAPA_MESORREGIOES.items():
+        if any(normalize_text(m) == mun_norm for m in municipios):
+            return regiao
+    # Padrão para municípios do Grande Oeste (Chapecó, Abelardo Luz, Xanxerê, etc.)
+    return "Oeste Catarinense"
+
 st.markdown("---")
 st.subheader("📊 Entrada de Variáveis Preditivas")
 
-# 3. Interface de Usuário (Apenas Seleção de Município)
+# 3. Interface de Usuário
 mapa_municipios = {normalize_text(m): m for m in le_mun.classes_}
-municipios_disponiveis = sorted(list(mapa_municipios.keys()))
+municipios_disponiveis = sorted(list(mapa_municipios.values()))
 
-municipio_selecionado_norm = st.selectbox("Município Alvo:", municipios_disponiveis)
-municipio_selecionado = mapa_municipios[municipio_selecionado_norm]
+municipio_selecionado = st.selectbox("Município Alvo:", municipios_disponiveis)
+municipio_norm = normalize_text(municipio_selecionado)
 
-# Normalização e filtro estrito dos dados do município selecionado
+# Filtro no DataFrame
 df_historico['municipio_norm'] = df_historico['municipio'].apply(normalize_text)
-df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_selecionado_norm].copy()
+df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_norm].copy()
 
-# --- Lógica Automática para Período e Ocorrências ---
+# Dados do mês mais recente registrado
 if not df_mun_atual.empty:
     periodo_selecionado = df_mun_atual['periodo'].max()
     dado_filtrado = df_mun_atual[df_mun_atual['periodo'] == periodo_selecionado]
-    col_ocorrencias = 'ocorrencias' if 'ocorrencias' in df_mun_atual.columns else df_mun_atual.columns[2]
-    casos_mes_anterior = int(dado_filtrado[col_ocorrencias].values[0]) if not dado_filtrado.empty else 10
+    casos_mes_anterior = int(dado_filtrado['ocorrencias'].values[0]) if not dado_filtrado.empty else 10
     
     st.info(f"Base para predição: Mês mais recente registrado (**{periodo_selecionado}**). "
             f"Ocorrências registradas em **{municipio_selecionado}**: **{casos_mes_anterior}** casos.")
@@ -76,30 +124,16 @@ else:
 if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
-        # --- EXTRAÇÃO DINÂMICA E PRECISA DA MESORREGIÃO ---
-        col_meso = None
-        for col in df_mun_atual.columns:
-            if normalize_text(col) in ['mesoregiao', 'mesorregiao', 'nome_meso', 'meso']:
-                col_meso = col
-                break
-        
-        mesoregiao_exata = None
-        if col_meso and not df_mun_atual.empty:
-            # Pega o primeiro valor válido de mesorregião do município selecionado
-            val_bruto = df_mun_atual[col_meso].dropna().iloc[0] if not df_mun_atual[col_meso].dropna().empty else None
-            if val_bruto:
-                val_norm = normalize_text(str(val_bruto)).strip()
-                # Busca no LabelEncoder
-                for classe_le in le_meso.classes_:
-                    if normalize_text(classe_le).strip() == val_norm:
-                        mesoregiao_exata = classe_le
-                        break
-        
-        # Fallback de segurança se a coluna não for encontrada no CSV
-        if not mesoregiao_exata:
-            mesoregiao_exata = le_meso.classes_[0]
+        # Identificação da mesorregião exata do município selecionado
+        mesoregiao_exata = obter_mesoregiao(municipio_selecionado)
 
-        # Codificação automática das variáveis categóricas
+        # Garantir correspondência de caixa/acentuação com o LabelEncoder do modelo
+        for classe_le in le_meso.classes_:
+            if normalize_text(classe_le) == normalize_text(mesoregiao_exata):
+                mesoregiao_exata = classe_le
+                break
+
+        # Codificação das variáveis
         mun_cod = le_mun.transform([municipio_selecionado])[0]
         meso_cod = le_meso.transform([mesoregiao_exata])[0]
         
@@ -110,11 +144,10 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         probabilidades = rf_model.predict_proba(X_scaled)[0]
         confianca = np.max(probabilidades) * 100
         
-        # --- CÁLCULOS ESTATÍSTICOS PARA O DIAGNÓSTICO ---
+        # Cálculos estatísticos
         if not df_mun_atual.empty and len(df_mun_atual) >= 2:
             df_ord = df_mun_atual.sort_values('periodo')
-            media_historica = df_ord[col_ocorrencias].mean()
-            
+            media_historica = df_ord['ocorrencias'].mean()
             diferenca_media = casos_mes_anterior - media_historica
             pct_media = (diferenca_media / media_historica * 100) if media_historica > 0 else 0.0
         else:
@@ -136,7 +169,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             indicador_delta = "Risco de Escalada" if predicao == 1 else "Risco Controlado"
             st.metric(label="Grau de Confiança (Modelo)", value=f"{confianca:.1f}%", delta=indicador_delta, delta_color=cor_delta)
 
-        # --- DIAGNÓSTICO EXPLICATIVO ---
+        # Diagnóstico
         st.markdown("### 📄 Diagnóstico")
         
         if abs(pct_media) < 5:
@@ -161,20 +194,19 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             * **Influência Regional:** O município pertence à mesorregião **{mesoregiao_exata}**. O comportamento observado nesta região indica um padrão sob controle, sustentando a projeção de estabilidade.
             """)
 
-        # 5. Interpretabilidade do Modelo com SHAP
+        # 5. Interpretabilidade com SHAP
         st.markdown("---")
         st.subheader("🧠 Por que o modelo chegou a esse resultado?")
         
         st.markdown("""
         O gráfico abaixo (*Waterfall SHAP*) explica passo a passo como o algoritmo calculou o risco para este município:
         
-        * 🔴 **Barras Vermelhas (Seta para a direita):** Fatores que **AUMENTAM** a chance de tendência de alta (empurram o risco para cima).
-        * 🔵 **Barras Azuis (Seta para a esquerda):** Fatores que **REDUZEM** a chance de alta (puxam a previsão para estabilidade).
-        * 📍 **$E[f(X)]$ (Base na parte inferior):** Média histórica geral de risco de todos os municípios catarinenses.
-        * 🏁 **$f(X)$ (Resultado no topo):** Probabilidade final calculada especificamente para este município após somar e subtrair os fatores.
+        * 🔴 **Barras Vermelhas:** Fatores que **AUMENTAM** a chance de tendência de alta.
+        * 🔵 **Barras Azuis:** Fatores que **REDUZEM** a chance de alta.
+        * 📍 **$E[f(X)]$:** Média histórica geral de risco.
+        * 🏁 **$f(X)$:** Probabilidade final calculada para este município.
         """)
 
-        # Cálculo dos valores SHAP
         shap_values = explainer.shap_values(X_scaled)
 
         if isinstance(shap_values, list):
@@ -190,7 +222,6 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
 
         features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
 
-        # Plot do gráfico Waterfall SHAP
         fig, ax = plt.subplots(figsize=(8, 3))
         shap.waterfall_plot(
             shap.Explanation(
@@ -203,13 +234,13 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         )
         st.pyplot(fig)
 
-        # 6. Contexto Histórico Local
+        # 6. Histórico Local
         st.markdown("---")
         st.subheader("📈 Contexto Histórico Local")
         
         if not df_mun_atual.empty:
             st.info(f"Série temporal completa de ocorrências registradas para {municipio_selecionado}.")
-            df_grafico = df_mun_atual[['periodo', col_ocorrencias]].set_index('periodo')
+            df_grafico = df_mun_atual[['periodo', 'ocorrencias']].set_index('periodo')
             st.line_chart(df_grafico)
         else:
             st.warning(f"Não foram encontrados registros históricos suficientes para {municipio_selecionado}.")
