@@ -13,6 +13,13 @@ Este MVP utiliza **Machine Learning (Random Forest)** para prever a tendência d
 ocorrências de violência doméstica nos municípios de Santa Catarina para o mês subsequente.
 """)
 
+# Função auxiliar para remover acentos e cedilha, padronizando a busca
+def normalize_text(text):
+    if not isinstance(text, str):
+        return text
+    # Normaliza para NFD, codifica em ASCII ignorando erros (remove acentos) e decodifica de volta
+    return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
+
 # 2. Carregamento dos Modelos e da Base de Dados (Cache)
 @st.cache_resource
 def load_models():
@@ -37,19 +44,29 @@ st.markdown("---")
 st.subheader("📊 Entrada de Variáveis Preditivas")
 
 # 3. Interface de Usuário (Apenas Município)
-# Puxa os municípios diretamente do CSV para garantir consistência com os dados
-municipios_disponiveis = sorted(df_historico['municipio'].dropna().unique())
-municipio_selecionado = st.selectbox("Município Alvo:", municipios_disponiveis)
 
-# Filtra o dataframe para o município escolhido
-df_mun_atual = df_historico[df_historico['municipio'] == municipio_selecionado]
+# Cria um dicionário mapeando o nome normalizado (sem acento) para o nome original que o modelo espera
+mapa_municipios = {normalize_text(m): m for m in le_mun.classes_}
+municipios_disponiveis = sorted(list(mapa_municipios.keys()))
+
+# O usuário seleciona o nome normalizado (mais amigável e evita problemas de encoding)
+municipio_selecionado_norm = st.selectbox("Município Alvo:", municipios_disponiveis)
+
+# Resgata o nome original (com acento, se houver) que o LabelEncoder foi treinado
+municipio_selecionado = mapa_municipios[municipio_selecionado_norm]
+
+# Normaliza a coluna de município do dataframe para garantir que o filtro funcione independente de acentos no CSV
+df_historico['municipio_norm'] = df_historico['municipio'].apply(normalize_text)
+df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_selecionado_norm]
 
 # --- Lógica Automática para Mesorregião ---
+# Cria um dicionário mapeando o nome normalizado para o nome original da mesorregião
+mapa_meso = {normalize_text(m): m for m in le_meso.classes_}
+
 if 'mesoregiao' in df_historico.columns and not df_mun_atual.empty:
-    mesoregiao = df_mun_atual['mesoregiao'].iloc[0]
-    # Garante que a mesorregião existe nas classes do encoder
-    if mesoregiao not in le_meso.classes_:
-        mesoregiao = le_meso.classes_[0]
+    # Pega a mesorregião do CSV, normaliza e busca a original no dicionário
+    meso_csv_norm = normalize_text(df_mun_atual['mesoregiao'].iloc[0])
+    mesoregiao = mapa_meso.get(meso_csv_norm, le_meso.classes_[0])
 else:
     mesoregiao = le_meso.classes_[0]
 
@@ -79,6 +96,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
         # Transformando entradas textuais em numéricas usando os encoders salvos
+        # Agora 'municipio_selecionado' e 'mesoregiao' são exatamente as strings originais que o modelo espera
         mun_cod = le_mun.transform([municipio_selecionado])[0]
         meso_cod = le_meso.transform([mesoregiao])[0]
         
