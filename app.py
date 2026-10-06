@@ -94,7 +94,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         probabilidades = rf_model.predict_proba(X_scaled)[0]
         confianca = np.max(probabilidades) * 100
         
-        # --- CÁLCULOS ESTATÍSTICOS PARA O TEXTO ENRIQUECIDO ---
+        # --- CÁLCULOS ESTATÍSTICOS ---
         if not df_mun_atual.empty and len(df_mun_atual) >= 2:
             df_ord = df_mun_atual.sort_values('periodo')
             media_historica = df_ord[col_ocorrencias].mean()
@@ -122,85 +122,22 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             indicador_delta = "Risco de Escalada" if predicao == 1 else "Risco Controlado"
             st.metric(label="Grau de Confiança (Modelo)", value=f"{confianca:.1f}%", delta=indicador_delta, delta_color=cor_delta)
 
-        # --- TEXTO QUALITATIVO ENRIQUECIDO ---
-        st.markdown("### 📋 Diagnóstico de Risco e Recomendações")
+        # --- DIAGNÓSTICO SIMPLIFICADO ---
+        st.markdown("### 📄 Diagnóstico Simplificado")
         
         if predicao == 1:
             st.markdown(f"""
-            O modelo projeta um **cenário de atenção para o próximo período** em **{municipio_selecionado}**, apontando probabilidade de elevação no volume total de chamados.
+            O modelo projeta uma **tendência de alta** no volume de ocorrências para **{municipio_selecionado}** no próximo período.
 
-            **Fatores Determinantes do Diagnóstico:**
-            * **Volume Recente:** O último registro foi de **{casos_mes_anterior} ocorrências** (variação de **{var_mensal:+.1f}%** em relação ao período imediatamente anterior).
-            * **Pressão Sobre a Média:** Este patamar situa-se **{var_media:+.1f}%** em relação à média histórica local (**{media_historica:.1f} casos/mês**).
-            * **Padrão Regional:** O comportamento epidemiológico da mesorregião **{mesoregiao}** atua como fator multiplicador do risco predito.
-
-            **Diretrizes de Ação Recomendadas:**
-            1. **Patrulha Maria da Penha (PM-SC):** Intensificar visitas preventivas e rondas prioritárias em áreas com maior histórico de reincidência.
-            2. **Rede de Assistência Social (CREAS/CRAS):** Reforçar o monitoramento de medidas protetivas de urgência ativas.
-            3. **Ações Intersetoriais:** Sinalizar o conselho tutelar e órgãos locais para prontidão no atendimento e acolhimento das vítimas.
+            * **Último registro:** {casos_mes_anterior} casos.
+            * **Média histórica local:** {media_historica:.1f} casos/mês.
+            * **Contexto regional:** A mesorregião **{mesoregiao}** apresenta padrões que elevam a probabilidade de risco predita pelo modelo.
             """)
         else:
             st.markdown(f"""
-            O modelo projeta a **manutenção da estabilidade ou tendência de queda** das ocorrências para **{municipio_selecionado}** no próximo período.
+            O modelo projeta **estabilidade ou redução** no volume de ocorrências para **{municipio_selecionado}** no próximo período.
 
-            **Fatores Determinantes do Diagnóstico:**
-            * **Volume Recente:** O volume de **{casos_mes_anterior} casos** indica um comportamento dentro ou abaixo do padrão observado (variação mensal de **{var_mensal:+.1f}%**).
-            * **Comportamento em Relação à Média:** O patamar atual oscila **{var_media:+.1f}%** comparado à média histórica (**{media_historica:.1f} casos/mês**).
-
-            **Diretrizes de Ação Recomendadas:**
-            1. Manter os protocolos operacionais padrão de patrulhamento preventivo e acolhimento.
-            2. Manter a atualização contínua dos dados no sistema para acompanhamento do próximo ciclo.
+            * **Último registro:** {casos_mes_anterior} casos.
+            * **Média histórica local:** {media_historica:.1f} casos/mês.
+            * **Contexto regional:** O histórico recente de **{mesoregiao}** mantém a estimativa em patamares dentro do esperado.
             """)
-
-        # 5. Interpretabilidade do Modelo com SHAP
-        st.markdown("---")
-        st.subheader("🧠 Por que o modelo chegou a esse resultado?")
-        
-        st.markdown("""
-        O gráfico abaixo (*Waterfall SHAP*) explica passo a passo como o algoritmo calculou o risco para este município:
-        
-        * 🔴 **Barras Vermelhas (Seta para a direita):** Fatores que **AUMENTAM** a chance de tendência de alta (empurram o risco para cima).
-        * 🔵 **Barras Azuis (Seta para a esquerda):** Fatores que **REDUZEM** a chance de alta (puxam a previsão para estabilidade).
-        * 📍 **$E[f(X)]$ (Base na parte inferior):** Média histórica geral de risco de todos os municípios catarinenses.
-        * 🏁 **$f(X)$ (Resultado no topo):** Probabilidade final calculada especificamente para este município após somar e subtrair os fatores.
-        """)
-
-        # Cálculo dos valores SHAP
-        shap_values = explainer.shap_values(X_scaled)
-
-        if isinstance(shap_values, list):
-            shap_val_target = shap_values[1][0]
-            expected_val = explainer.expected_value[1]
-        else:
-            if len(shap_values.shape) == 3:
-                shap_val_target = shap_values[0, :, 1]
-                expected_val = explainer.expected_value[1]
-            else:
-                shap_val_target = shap_values[0]
-                expected_val = explainer.expected_value
-
-        features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
-
-        # Plot do gráfico Waterfall SHAP
-        fig, ax = plt.subplots(figsize=(8, 3))
-        shap.waterfall_plot(
-            shap.Explanation(
-                values=shap_val_target,
-                base_values=expected_val,
-                data=X_input[0],
-                feature_names=features
-            ),
-            show=False
-        )
-        st.pyplot(fig)
-
-        # 6. Contexto Histórico Local
-        st.markdown("---")
-        st.subheader("📈 Contexto Histórico Local")
-        
-        if not df_mun_atual.empty:
-            st.info(f"Série temporal completa de ocorrências registradas para {municipio_selecionado}.")
-            df_grafico = df_mun_atual[['periodo', col_ocorrencias]].set_index('periodo')
-            st.line_chart(df_grafico)
-        else:
-            st.warning(f"Não foram encontrados registros históricos suficientes para {municipio_selecionado}.")
