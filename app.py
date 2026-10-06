@@ -47,26 +47,37 @@ except Exception as e:
 st.markdown("---")
 st.subheader("📊 Entrada de Variáveis Preditivas")
 
-# 3. Interface de Usuário (Apenas Município)
+# 3. Interface de Usuário (Apenas Seleção de Município)
 mapa_municipios = {normalize_text(m): m for m in le_mun.classes_}
 municipios_disponiveis = sorted(list(mapa_municipios.keys()))
 
 municipio_selecionado_norm = st.selectbox("Município Alvo:", municipios_disponiveis)
 municipio_selecionado = mapa_municipios[municipio_selecionado_norm]
 
-# Filtro estrito pelo município selecionado
+# Normalização e filtro estrito dos dados do município selecionado
 df_historico['municipio_norm'] = df_historico['municipio'].apply(normalize_text)
 df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_selecionado_norm].copy()
 
-# --- Extração Garantida da Mesorregião do Município Selecionado ---
-mapa_meso = {normalize_text(m): m for m in le_meso.classes_}
+# --- BUSCA AUTOMÁTICA DA MESORREGIÃO A PARTIR DO MUNICÍPIO ---
+# Identifica a coluna de mesorregião no CSV
+col_meso = next((col for col in ['mesoregiao', 'mesorregiao', 'nome_meso', 'meso'] if col in df_historico.columns), None)
 
-if not df_mun_atual.empty and 'mesoregiao' in df_mun_atual.columns:
-    val_meso_bruto = df_mun_atual['mesoregiao'].iloc[0]
-    meso_csv_norm = normalize_text(str(val_meso_bruto))
-    mesoregiao = mapa_meso.get(meso_csv_norm, str(val_meso_bruto))
-else:
-    mesoregiao = le_meso.classes_[0]
+mesoregiao_exata = None
+if col_meso and not df_mun_atual.empty:
+    valores_meso = df_mun_atual[col_meso].dropna()
+    if not valores_meso.empty:
+        val_meso_str = str(valores_meso.iloc[0]).strip()
+        
+        # Faz a correspondência com as classes do LabelEncoder da mesorregião
+        mapa_meso_le = {normalize_text(m): m for m in le_meso.classes_}
+        val_meso_norm = normalize_text(val_meso_str)
+        
+        if val_meso_norm in mapa_meso_le:
+            mesoregiao_exata = mapa_meso_le[val_meso_norm]
+
+# Se por algum motivo não encontrar no CSV, pega a primeira do encoder como contingência
+if not mesoregiao_exata:
+    mesoregiao_exata = le_meso.classes_[0]
 
 # --- Lógica Automática para Período e Ocorrências ---
 if not df_mun_atual.empty:
@@ -86,13 +97,9 @@ else:
 if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
-        # Codificação correta das variáveis categóricas
-        if mesoregiao not in le_meso.classes_:
-            meso_cod = 0
-        else:
-            meso_cod = le_meso.transform([mesoregiao])[0]
-            
+        # Codificação automática das variáveis categóricas
         mun_cod = le_mun.transform([municipio_selecionado])[0]
+        meso_cod = le_meso.transform([mesoregiao_exata])[0]
         
         X_input = np.array([[mun_cod, meso_cod, casos_mes_anterior]])
         X_scaled = scaler.transform(X_input)
@@ -101,11 +108,10 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         probabilidades = rf_model.predict_proba(X_scaled)[0]
         confianca = np.max(probabilidades) * 100
         
-        # --- CÁLCULOS ESTATÍSTICOS PARA CONTEXTO ---
+        # --- CÁLCULOS ESTATÍSTICOS PARA O DIAGNÓSTICO ---
         if not df_mun_atual.empty and len(df_mun_atual) >= 2:
             df_ord = df_mun_atual.sort_values('periodo')
             media_historica = df_ord[col_ocorrencias].mean()
-            casos_retrasado = df_ord[col_ocorrencias].iloc[-2] if len(df_ord) > 1 else casos_mes_anterior
             
             diferenca_media = casos_mes_anterior - media_historica
             pct_media = (diferenca_media / media_historica * 100) if media_historica > 0 else 0.0
@@ -131,7 +137,6 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         # --- DIAGNÓSTICO EXPLICATIVO ---
         st.markdown("### 📄 Diagnóstico")
         
-        # Definição textual da relação com a média
         if abs(pct_media) < 5:
             relacao_media = f"praticamente alinhado à média histórica local ({media_historica:.1f} casos/mês)."
         elif pct_media > 0:
@@ -144,14 +149,14 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             O modelo projeta uma **tendência de alta** nas ocorrências de **{municipio_selecionado}** para o próximo período.
 
             * **Análise do Volume:** O município registrou **{casos_mes_anterior} ocorrências** no último período, estando {relacao_media}
-            * **Influência Regional:** O município pertence à mesorregião **{mesoregiao}**. A dinâmica e o histórico recente dos municípios desta região contribuem significativamente para elevar a probabilidade de risco estimada pelo algoritmo.
+            * **Influência Regional:** O município pertence à mesorregião **{mesoregiao_exata}**. A dinâmica e o histórico recente dos municípios desta região contribuem para elevar a probabilidade de risco estimada pelo algoritmo.
             """)
         else:
             st.markdown(f"""
             O modelo projeta **estabilidade ou redução** nas ocorrências de **{municipio_selecionado}** para o próximo período.
 
             * **Análise do Volume:** O município registrou **{casos_mes_anterior} ocorrências** no último período, estando {relacao_media}
-            * **Influência Regional:** O município pertence à mesorregião **{mesoregiao}**. O comportamento observado nesta região indica um padrão sob controle, sustentando a projeção de estabilidade.
+            * **Influência Regional:** O município pertence à mesorregião **{mesoregiao_exata}**. O comportamento observado nesta região indica um padrão sob controle, sustentando a projeção de estabilidade.
             """)
 
         # 5. Interpretabilidade do Modelo com SHAP
@@ -180,3 +185,29 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             else:
                 shap_val_target = shap_values[0]
                 expected_val = explainer.expected_value
+
+        features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
+
+        # Plot do gráfico Waterfall SHAP
+        fig, ax = plt.subplots(figsize=(8, 3))
+        shap.waterfall_plot(
+            shap.Explanation(
+                values=shap_val_target,
+                base_values=expected_val,
+                data=X_input[0],
+                feature_names=features
+            ),
+            show=False
+        )
+        st.pyplot(fig)
+
+        # 6. Contexto Histórico Local
+        st.markdown("---")
+        st.subheader("📈 Contexto Histórico Local")
+        
+        if not df_mun_atual.empty:
+            st.info(f"Série temporal completa de ocorrências registradas para {municipio_selecionado}.")
+            df_grafico = df_mun_atual[['periodo', col_ocorrencias]].set_index('periodo')
+            st.line_chart(df_grafico)
+        else:
+            st.warning(f"Não foram encontrados registros históricos suficientes para {municipio_selecionado}.")
