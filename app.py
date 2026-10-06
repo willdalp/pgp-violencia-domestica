@@ -3,6 +3,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import unicodedata
+import shap
+import matplotlib.pyplot as plt
 
 # 1. Configuração da Página
 st.set_page_config(page_title="MVP - Violência SC", page_icon="🚨", layout="centered")
@@ -27,14 +29,17 @@ def load_models():
     le_mun = joblib.load('models/le_mun.joblib')
     le_meso = joblib.load('models/le_meso.joblib')
     scaler = joblib.load('models/scaler.joblib')
-    return rf_model, le_mun, le_meso, scaler
+    
+    # Prepara o explicador SHAP com o modelo Random Forest já existente
+    explainer = shap.TreeExplainer(rf_model)
+    return rf_model, le_mun, le_meso, scaler, explainer
 
 @st.cache_data
 def load_data():
     return pd.read_csv('data/base_modelo_violencia_domestica_sc.csv')
 
 try:
-    rf_model, le_mun, le_meso, scaler = load_models()
+    rf_model, le_mun, le_meso, scaler, explainer = load_models()
     df_historico = load_data()
 except Exception as e:
     st.error(f"Erro de infraestrutura ou carregamento de arquivos: Detalhes: {e}")
@@ -96,7 +101,6 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
         # Transformando entradas textuais em numéricas usando os encoders salvos
-        # Agora 'municipio_selecionado' e 'mesoregiao' são exatamente as strings originais que o modelo espera
         mun_cod = le_mun.transform([municipio_selecionado])[0]
         meso_cod = le_meso.transform([mesoregiao])[0]
         
@@ -126,13 +130,44 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             indicador_delta = "Risco de Escalada" if predicao == 1 else "Risco Controlado"
             st.metric(label="Grau de Confiança (Modelo)", value=f"{confianca:.1f}%", delta=indicador_delta, delta_color=cor_delta)
 
-        # 5. Interpretabilidade (Feature Importance)
+        # 5. Interpretabilidade do Modelo com SHAP (Explicabilidade da Consulta Atual)
         st.markdown("---")
-        st.subheader("🧠 Interpretabilidade do Modelo")
-        st.write("Peso de cada variável na construção do alerta atual (Feature Importance):")
-        
-        importancias = rf_model.feature_importances_
+        st.subheader("🧠 Interpretabilidade da Decisão (SHAP)")
+        st.write("Entenda quais fatores específicos empurraram a previsão atual para **Alta** ou **Estável/Queda**:")
+
+        # Cálculo dos valores SHAP com a entrada padronizada X_scaled
+        shap_values = explainer.shap_values(X_scaled)
+
+        # Trata o formato de saída do SHAP para classificação binária (Classe 1 = Tendência de Alta)
+        if isinstance(shap_values, list):
+            shap_val_target = shap_values[1][0]
+            expected_val = explainer.expected_value[1]
+        else:
+            if len(shap_values.shape) == 3:
+                shap_val_target = shap_values[0, :, 1]
+                expected_val = explainer.expected_value[1]
+            else:
+                shap_val_target = shap_values[0]
+                expected_val = explainer.expected_value
+
         features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
+
+        # Plot do gráfico Waterfall SHAP
+        fig, ax = plt.subplots(figsize=(8, 3))
+        shap.waterfall_plot(
+            shap.Explanation(
+                values=shap_val_target,
+                base_values=expected_val,
+                data=X_input[0],
+                feature_names=features
+            ),
+            show=False
+        )
+        st.pyplot(fig)
+
+        # Feature Importance Geral (Modelo Global)
+        st.markdown("#### 📊 Importância Geral das Variáveis (Visão Global do Modelo)")
+        importancias = rf_model.feature_importances_
         df_importancias = pd.DataFrame({'Variável': features, 'Importância (%)': importancias * 100}).set_index('Variável')
         st.bar_chart(df_importancias, color="#ff4b4b" if predicao == 1 else "#00cc96")
 
