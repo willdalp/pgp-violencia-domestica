@@ -58,27 +58,6 @@ municipio_selecionado = mapa_municipios[municipio_selecionado_norm]
 df_historico['municipio_norm'] = df_historico['municipio'].apply(normalize_text)
 df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_selecionado_norm].copy()
 
-# --- BUSCA AUTOMÁTICA DA MESORREGIÃO A PARTIR DO MUNICÍPIO ---
-# Identifica a coluna de mesorregião no CSV
-col_meso = next((col for col in ['mesoregiao', 'mesorregiao', 'nome_meso', 'meso'] if col in df_historico.columns), None)
-
-mesoregiao_exata = None
-if col_meso and not df_mun_atual.empty:
-    valores_meso = df_mun_atual[col_meso].dropna()
-    if not valores_meso.empty:
-        val_meso_str = str(valores_meso.iloc[0]).strip()
-        
-        # Faz a correspondência com as classes do LabelEncoder da mesorregião
-        mapa_meso_le = {normalize_text(m): m for m in le_meso.classes_}
-        val_meso_norm = normalize_text(val_meso_str)
-        
-        if val_meso_norm in mapa_meso_le:
-            mesoregiao_exata = mapa_meso_le[val_meso_norm]
-
-# Se por algum motivo não encontrar no CSV, pega a primeira do encoder como contingência
-if not mesoregiao_exata:
-    mesoregiao_exata = le_meso.classes_[0]
-
 # --- Lógica Automática para Período e Ocorrências ---
 if not df_mun_atual.empty:
     periodo_selecionado = df_mun_atual['periodo'].max()
@@ -97,6 +76,29 @@ else:
 if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
+        # --- EXTRAÇÃO DINÂMICA E PRECISA DA MESORREGIÃO ---
+        col_meso = None
+        for col in df_mun_atual.columns:
+            if normalize_text(col) in ['mesoregiao', 'mesorregiao', 'nome_meso', 'meso']:
+                col_meso = col
+                break
+        
+        mesoregiao_exata = None
+        if col_meso and not df_mun_atual.empty:
+            # Pega o primeiro valor válido de mesorregião do município selecionado
+            val_bruto = df_mun_atual[col_meso].dropna().iloc[0] if not df_mun_atual[col_meso].dropna().empty else None
+            if val_bruto:
+                val_norm = normalize_text(str(val_bruto)).strip()
+                # Busca no LabelEncoder
+                for classe_le in le_meso.classes_:
+                    if normalize_text(classe_le).strip() == val_norm:
+                        mesoregiao_exata = classe_le
+                        break
+        
+        # Fallback de segurança se a coluna não for encontrada no CSV
+        if not mesoregiao_exata:
+            mesoregiao_exata = le_meso.classes_[0]
+
         # Codificação automática das variáveis categóricas
         mun_cod = le_mun.transform([municipio_selecionado])[0]
         meso_cod = le_meso.transform([mesoregiao_exata])[0]
