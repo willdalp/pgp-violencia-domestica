@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import joblib
 import numpy as np
@@ -15,24 +16,45 @@ Este MVP utiliza **Machine Learning (Random Forest)** para prever a tendência d
 ocorrências de violência doméstica nos municípios de Santa Catarina para o mês subsequente.
 """)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def normalize_text(text):
     if not isinstance(text, str):
         return text
     return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII').strip().upper()
 
-# 2. Carregamento dos Modelos e da Base de Dados (Cache)
+# 2. Carregamento dos Modelos e da Base de Dados (Caminhos Absolutos)
 @st.cache_resource
 def load_models():
-    rf_model = joblib.load('models/modelo_baseline_rf.joblib')
-    le_mun = joblib.load('models/le_mun.joblib')
-    le_meso = joblib.load('models/le_meso.joblib')
-    scaler = joblib.load('models/scaler.joblib')
+    rf_path = os.path.join(BASE_DIR, 'modelo_baseline_rf.joblib')
+    if not os.path.exists(rf_path):
+        rf_path = os.path.join(BASE_DIR, 'models', 'modelo_baseline_rf.joblib')
+        
+    le_mun_path = os.path.join(BASE_DIR, 'le_mun.joblib')
+    if not os.path.exists(le_mun_path):
+        le_mun_path = os.path.join(BASE_DIR, 'models', 'le_mun.joblib')
+
+    le_meso_path = os.path.join(BASE_DIR, 'le_meso.joblib')
+    if not os.path.exists(le_meso_path):
+        le_meso_path = os.path.join(BASE_DIR, 'models', 'le_meso.joblib')
+
+    scaler_path = os.path.join(BASE_DIR, 'scaler.joblib')
+    if not os.path.exists(scaler_path):
+        scaler_path = os.path.join(BASE_DIR, 'models', 'scaler.joblib')
+
+    rf_model = joblib.load(rf_path)
+    le_mun = joblib.load(le_mun_path)
+    le_meso = joblib.load(le_meso_path)
+    scaler = joblib.load(scaler_path)
     explainer = shap.TreeExplainer(rf_model)
     return rf_model, le_mun, le_meso, scaler, explainer
 
 @st.cache_data
 def load_data():
-    return pd.read_csv('base_modelo_violencia_domestica_sc.csv')
+    csv_path = os.path.join(BASE_DIR, 'base_modelo_violencia_domestica_sc.csv')
+    if not os.path.exists(csv_path):
+        csv_path = os.path.join(BASE_DIR, 'data', 'base_modelo_violencia_domestica_sc.csv')
+    return pd.read_csv(csv_path)
 
 try:
     rf_model, le_mun, le_meso, scaler, explainer = load_models()
@@ -90,7 +112,6 @@ def obter_mesoregiao(municipio_str):
     for regiao, municipios in MAPA_MESORREGIOES.items():
         if any(normalize_text(m) == mun_norm for m in municipios):
             return regiao
-    # Padrão para municípios do Grande Oeste (Chapecó, Abelardo Luz, Xanxerê, etc.)
     return "Oeste Catarinense"
 
 st.markdown("---")
@@ -107,7 +128,6 @@ municipio_norm = normalize_text(municipio_selecionado)
 df_historico['municipio_norm'] = df_historico['municipio'].apply(normalize_text)
 df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_norm].copy()
 
-# Dados do mês mais recente registrado
 if not df_mun_atual.empty:
     periodo_selecionado = df_mun_atual['periodo'].max()
     dado_filtrado = df_mun_atual[df_mun_atual['periodo'] == periodo_selecionado]
@@ -124,16 +144,13 @@ else:
 if st.button("Executar Algoritmo de Predição", type="primary"):
     with st.spinner("Processando dados e consultando o modelo Random Forest..."):
         
-        # Identificação da mesorregião exata do município selecionado
         mesoregiao_exata = obter_mesoregiao(municipio_selecionado)
 
-        # Garantir correspondência de caixa/acentuação com o LabelEncoder do modelo
         for classe_le in le_meso.classes_:
             if normalize_text(classe_le) == normalize_text(mesoregiao_exata):
                 mesoregiao_exata = classe_le
                 break
 
-        # Codificação das variáveis
         mun_cod = le_mun.transform([municipio_selecionado])[0]
         meso_cod = le_meso.transform([mesoregiao_exata])[0]
         
@@ -144,7 +161,6 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         probabilidades = rf_model.predict_proba(X_scaled)[0]
         confianca = np.max(probabilidades) * 100
         
-        # Cálculos estatísticos
         if not df_mun_atual.empty and len(df_mun_atual) >= 2:
             df_ord = df_mun_atual.sort_values('periodo')
             media_historica = df_ord['ocorrencias'].mean()
@@ -169,7 +185,6 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
             indicador_delta = "Risco de Escalada" if predicao == 1 else "Risco Controlado"
             st.metric(label="Grau de Confiança (Modelo)", value=f"{confianca:.1f}%", delta=indicador_delta, delta_color=cor_delta)
 
-        # Diagnóstico
         st.markdown("### 📄 Diagnóstico")
         
         if abs(pct_media) < 5:
