@@ -36,46 +36,43 @@ except Exception as e:
 st.markdown("---")
 st.subheader("📊 Entrada de Variáveis Preditivas")
 
-# 3. Interface de Usuário Inteligente baseada no CSV
-col1, col2 = st.columns(2)
+# 3. Interface de Usuário (Apenas Município)
+# Puxa os municípios diretamente do CSV para garantir consistência com os dados
+municipios_disponiveis = sorted(df_historico['municipio'].dropna().unique())
+municipio_selecionado = st.selectbox("Município Alvo:", municipios_disponiveis)
 
-with col1:
-    # Puxa os municípios diretamente do CSV para garantir consistência com os dados
-    municipios_disponiveis = sorted(df_historico['municipio'].dropna().unique())
-    municipio_selecionado = st.selectbox("Município Alvo:", municipios_disponiveis)
+# Filtra o dataframe para o município escolhido
+df_mun_atual = df_historico[df_historico['municipio'] == municipio_selecionado]
 
-with col2:
-    # Filtra o dataframe para o município escolhido para detetar a mesorregião correspondente na base
-    df_mun_atual = df_historico[df_historico['municipio'] == municipio_selecionado]
+# --- Lógica Automática para Mesorregião ---
+if 'mesoregiao' in df_historico.columns and not df_mun_atual.empty:
+    mesoregiao = df_mun_atual['mesoregiao'].iloc[0]
+    # Garante que a mesorregião existe nas classes do encoder
+    if mesoregiao not in le_meso.classes_:
+        mesoregiao = le_meso.classes_[0]
+else:
+    mesoregiao = le_meso.classes_[0]
+
+# --- Lógica Automática para Período e Ocorrências ---
+if not df_mun_atual.empty:
+    # Pega o período mais recente disponível (assumindo formato YYYY-MM-DD)
+    periodo_selecionado = df_mun_atual['periodo'].max()
     
-    # Tenta puxar a mesorregião do CSV se a coluna existir, senão usa o encoder original
-    if 'mesoregiao' in df_historico.columns and not df_mun_atual.empty:
-        mesoregiao_sugerida = df_mun_atual['mesoregiao'].iloc[0]
-        # Garante que a mesorregião existe nas classes do encoder
-        mesoregios_validas = list(le_meso.classes_)
-        if mesoregiao_sugerida not in mesoregios_validas:
-            mesoregiao_sugerida = mesoregios_validas[0]
-    else:
-        mesoregiao_sugerida = le_meso.classes_[0]
-        
-    mesoregiao = st.selectbox("Mesorregião de Pertencimento:", le_meso.classes_, index=list(le_meso.classes_).index(mesoregiao_sugerida))
-
-# Seleção do Período Histórico para definir as ocorrências do mês anterior
-periodos_disponiveis = sorted(df_mun_atual['periodo'].dropna().unique()) if not df_mun_atual.empty else []
-
-if periodos_disponiveis:
-    periodo_selecionado = st.selectbox("Selecione o Mês de Referência (Base para a Predição):", periodos_disponiveis)
-    
-    # Puxa o valor real de ocorrências daquele mês específico no CSV
+    # Puxa o valor real de ocorrências desse último mês no CSV
     dado_filtrado = df_mun_atual[df_mun_atual['periodo'] == periodo_selecionado]
     
     # Ajuste o nome da coluna de ocorrências se no seu CSV for diferente de 'ocorrencias'
     col_ocorrencias = 'ocorrencias' if 'ocorrencias' in df_mun_atual.columns else df_mun_atual.columns[2]
     
     casos_mes_anterior = int(dado_filtrado[col_ocorrencias].values[0]) if not dado_filtrado.empty else 10
-    st.info(f"Ocorrências registradas em **{periodo_selecionado}** para {municipio_selecionado}: **{casos_mes_anterior}** casos.")
+    
+    st.info(f"Base para predição: Mês mais recente registrado (**{periodo_selecionado}**). "
+            f"Ocorrências registradas em **{municipio_selecionado}**: **{casos_mes_anterior}** casos.")
 else:
-    casos_mes_anterior = st.number_input("Total de Ocorrências no Mês Anterior:", min_value=0, value=10, step=1)
+    # Fallback de segurança caso o município não tenha dados históricos
+    periodo_selecionado = "N/A"
+    casos_mes_anterior = 10
+    st.warning(f"Não foram encontrados dados históricos suficientes para **{municipio_selecionado}**. Utilizando valor padrão de 10 ocorrências para a predição.")
 
 # 4. Execução do Algoritmo e Resultados
 if st.button("Executar Algoritmo de Predição", type="primary"):
