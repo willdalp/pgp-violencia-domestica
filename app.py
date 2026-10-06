@@ -154,9 +154,18 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
 
         # 5. Interpretabilidade do Modelo com SHAP
         st.markdown("---")
-        st.subheader("🧠 Explicabilidade Preditiva (SHAP)")
-        st.write("Decomposição do impacto numérico de cada variável na pontuação final do modelo:")
+        st.subheader("🧠 Por que o modelo chegou a esse resultado?")
+        
+        st.markdown("""
+        O gráfico abaixo (*Waterfall SHAP*) explica passo a passo como o algoritmo calculou o risco para este município:
+        
+        * 🔴 **Barras Vermelhas (Seta para a direita):** Fatores que **AUMENTAM** a chance de tendência de alta (empurram o risco para cima).
+        * 🔵 **Barras Azuis (Seta para a esquerda):** Fatores que **REDUZEM** a chance de alta (puxam a previsão para estabilidade).
+        * 📍 **$E[f(X)]$ (Base na parte inferior):** Média histórica geral de risco de todos os municípios catarinenses.
+        * 🏁 **$f(X)$ (Resultado no topo):** Probabilidade final calculada especificamente para este município após somar e subtrair os fatores.
+        """)
 
+        # Cálculo dos valores SHAP
         shap_values = explainer.shap_values(X_scaled)
 
         if isinstance(shap_values, list):
@@ -172,6 +181,7 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
 
         features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
 
+        # Plot do gráfico Waterfall SHAP
         fig, ax = plt.subplots(figsize=(8, 3))
         shap.waterfall_plot(
             shap.Explanation(
