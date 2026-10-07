@@ -214,13 +214,18 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
         st.subheader("🧠 Por que o modelo chegou a esse resultado?")
         
         st.markdown("""
-        O gráfico abaixo (*Waterfall SHAP*) explica passo a passo como o algoritmo calculou o risco para este município:
+        O gráfico abaixo (*Waterfall SHAP*) explica passo a passo como o algoritmo calculou o risco para este município.
         
-        * 🔴 **Barras Vermelhas:** Fatores que **AUMENTAM** a chance de tendência de alta.
-        * 🔵 **Barras Azuis:** Fatores que **REDUZEM** a chance de alta.
-        * 📍 **$E[f(X)]$:** Média histórica geral de risco.
-        * 🏁 **$f(X)$:** Probabilidade final calculada para este município.
-        """)
+        **Como ler este gráfico:**
+        *   **Números à esquerda (ex: Chapecó, 229):** São os valores reais das variáveis para este município.
+        *   **Números nas barras (ex: +0.24):** É o impacto (peso) de cada variável na previsão final.
+            *   Valores **positivos (vermelho)** aumentam a probabilidade de escalada.
+            *   Valores **negativos (azul)** reduzem a probabilidade de escalada.
+        *   **Base E[f(X)]:** É a probabilidade média de escalada de todos os municípios (o ponto de partida).
+        *   **f(X):** É a probabilidade final calculada para este município específico.
+        
+        *Exemplo prático:* O fato de ser o município de **{municipio_selecionado}** contribuiu com **+0.24** (ou +24%) para a probabilidade final.
+        """.replace("{municipio_selecionado}", municipio_selecionado))
 
         shap_values = explainer.shap_values(X_scaled)
 
@@ -237,12 +242,19 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
 
         features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
 
+        # --- CORREÇÃO: Criamos um array com os nomes legíveis para exibir no gráfico ---
+        X_display = np.array([
+            municipio_selecionado, 
+            mesoregiao_exata, 
+            str(casos_mes_anterior)
+        ], dtype=object)
+
         fig, ax = plt.subplots(figsize=(8, 3))
         shap.waterfall_plot(
             shap.Explanation(
                 values=shap_val_target,
                 base_values=expected_val,
-                data=X_input[0],
+                data=X_display,  # <--- Mudança aqui: antes era X_input[0]
                 feature_names=features
             ),
             show=False
