@@ -262,5 +262,5 @@ if st.button("Executar Algoritmo de Predição", type="primary"):
 
         # 7. Melhoria da Sprint 4: Nota de Auditoria do Modelo (Validação de Robustez)
         st.markdown("---")
-        st.subheader("⚙️ Auditoria e Qualidade do Modelo (Sprint 4)")
+        st.subheader("⚙️ Auditoria e Qualidade do Modelo")
         st.success("✔ Modelo validado via framework CRISP-ML(Q) com estabilidade garantida em ambiente de produção (Streamlit Cloud).")
