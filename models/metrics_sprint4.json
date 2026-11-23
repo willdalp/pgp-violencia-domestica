@@ -1,0 +1,162 @@
+{
+  "versao": "v2.0-sprint4",
+  "modelo_producao": "v2_Random_Forest_Tunado",
+  "n_registros_total": 21240,
+  "n_registros_treino": 14750,
+  "n_registros_teste": 6490,
+  "n_municipios": 295,
+  "periodo_treino": [
+    "2020-07-01",
+    "2024-08-01"
+  ],
+  "periodo_teste": [
+    "2024-09-01",
+    "2026-06-01"
+  ],
+  "features": [
+    "municipio_cod",
+    "mesoregiao_cod",
+    "populacao_feminina",
+    "alfabetizacao_total",
+    "ocorrencias",
+    "taxa_violencia_100k",
+    "taxa_violencia_mes_anterior",
+    "taxa_violencia_3_meses_atras",
+    "taxa_violencia_6_meses_atras",
+    "media_3_meses",
+    "media_6_meses",
+    "desvio_media_3m",
+    "delta_ultimo_mes",
+    "feminicidios",
+    "mes_seno",
+    "mes_cosseno"
+  ],
+  "feature_labels": [
+    "Município",
+    "Mesorregião",
+    "População Feminina",
+    "Taxa de Alfabetização",
+    "Ocorrências (Mês Atual)",
+    "Taxa Violência / 100k (Atual)",
+    "Taxa Violência / 100k (Mês -1)",
+    "Taxa Violência / 100k (Mês -3)",
+    "Taxa Violência / 100k (Mês -6)",
+    "Média Móvel Taxa (3 meses)",
+    "Média Móvel Taxa (6 meses)",
+    "Desvio da Média Móvel (3m)",
+    "Variação Taxa (Último Mês)",
+    "Feminicídios (Mês Atual)",
+    "Sazonalidade (Mês Seno)",
+    "Sazonalidade (Mês Cosseno)"
+  ],
+  "feature_importances": {
+    "Desvio da Média Móvel (3m)": 0.212,
+    "Taxa Violência / 100k (Atual)": 0.1945,
+    "Variação Taxa (Último Mês)": 0.1217,
+    "População Feminina": 0.064,
+    "Média Móvel Taxa (6 meses)": 0.0523,
+    "Média Móvel Taxa (3 meses)": 0.0468,
+    "Taxa Violência / 100k (Mês -1)": 0.0445,
+    "Taxa Violência / 100k (Mês -6)": 0.044,
+    "Ocorrências (Mês Atual)": 0.0425,
+    "Taxa Violência / 100k (Mês -3)": 0.0411,
+    "Município": 0.0372,
+    "Taxa de Alfabetização": 0.0367,
+    "Sazonalidade (Mês Cosseno)": 0.0287,
+    "Sazonalidade (Mês Seno)": 0.0225,
+    "Mesorregião": 0.0114,
+    "Feminicídios (Mês Atual)": 0.0001
+  },
+  "benchmark": [
+    {
+      "modelo": "v1_Regressao_Logistica_Baseline",
+      "acuracia": 0.551,
+      "precisao": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "roc_auc": 0.5101,
+      "matriz_confusao": [
+        [
+          3576,
+          0
+        ],
+        [
+          2914,
+          0
+        ]
+      ]
+    },
+    {
+      "modelo": "v1_Random_Forest_Baseline",
+      "acuracia": 0.6639,
+      "precisao": 0.645,
+      "recall": 0.5594,
+      "f1_score": 0.5992,
+      "roc_auc": 0.709,
+      "matriz_confusao": [
+        [
+          2679,
+          897
+        ],
+        [
+          1284,
+          1630
+        ]
+      ]
+    },
+    {
+      "modelo": "v2_Regressao_Logistica_Integrada",
+      "acuracia": 0.7022,
+      "precisao": 0.6755,
+      "recall": 0.6479,
+      "f1_score": 0.6614,
+      "roc_auc": 0.7641,
+      "matriz_confusao": [
+        [
+          2669,
+          907
+        ],
+        [
+          1026,
+          1888
+        ]
+      ]
+    },
+    {
+      "modelo": "v2_Random_Forest_Tunado",
+      "acuracia": 0.7106,
+      "precisao": 0.671,
+      "recall": 0.6977,
+      "f1_score": 0.6841,
+      "roc_auc": 0.7788,
+      "matriz_confusao": [
+        [
+          2579,
+          997
+        ],
+        [
+          881,
+          2033
+        ]
+      ]
+    },
+    {
+      "modelo": "v2_Gradient_Boosting_Integrado",
+      "acuracia": 0.7157,
+      "precisao": 0.6919,
+      "recall": 0.6613,
+      "f1_score": 0.6763,
+      "roc_auc": 0.7863,
+      "matriz_confusao": [
+        [
+          2718,
+          858
+        ],
+        [
+          987,
+          1927
+        ]
+      ]
+    }
+  ]
+}
