@@ -1,266 +1,671 @@
+import json
 import os
-import streamlit as st
+import unicodedata
+
 import joblib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import unicodedata
+import plotly.express as px
+import plotly.graph_objects as go
 import shap
-import matplotlib.pyplot as plt
+import streamlit as st
 
-# 1. Configuração da Página
-st.set_page_config(page_title="MVP - Violência SC", page_icon="🚨", layout="centered")
-
-st.title("🚨 Previsão de Escalada: Violência Doméstica (SC)")
-st.markdown("""
-Este MVP utiliza **Machine Learning (Random Forest)** para prever a tendência de aumento das 
-ocorrências de violência doméstica nos municípios de Santa Catarina para o mês subsequente.
-""")
+# ============================================================
+# 1. CONFIGURAÇÃO DA PÁGINA
+# ============================================================
+st.set_page_config(
+    page_title="SC Segura ML — Previsão de Escalada (Violência Doméstica)",
+    page_icon="🚨",
+    layout="wide",
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+DEFAULT_FEATURES = [
+    "municipio_cod",
+    "mesoregiao_cod",
+    "populacao_feminina",
+    "alfabetizacao_total",
+    "ocorrencias",
+    "taxa_violencia_100k",
+    "taxa_violencia_mes_anterior",
+    "taxa_violencia_3_meses_atras",
+    "taxa_violencia_6_meses_atras",
+    "media_3_meses",
+    "media_6_meses",
+    "desvio_media_3m",
+    "delta_ultimo_mes",
+    "feminicidios",
+    "mes_seno",
+    "mes_cosseno",
+]
+
+DEFAULT_FEATURE_LABELS = [
+    "Município",
+    "Mesorregião",
+    "População Feminina",
+    "Taxa de Alfabetização",
+    "Ocorrências (Mês Atual)",
+    "Taxa Violência / 100k (Atual)",
+    "Taxa Violência / 100k (Mês -1)",
+    "Taxa Violência / 100k (Mês -3)",
+    "Taxa Violência / 100k (Mês -6)",
+    "Média Móvel Taxa (3 meses)",
+    "Média Móvel Taxa (6 meses)",
+    "Desvio da Média Móvel (3m)",
+    "Variação Taxa (Último Mês)",
+    "Feminicídios (Mês Atual)",
+    "Sazonalidade (Mês Seno)",
+    "Sazonalidade (Mês Cosseno)",
+]
+
+
 def normalize_text(text):
     if not isinstance(text, str):
-        return text
-    return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII').strip().upper()
+        return "" if pd.isna(text) else str(text)
+    return (
+        unicodedata.normalize("NFKD", text)
+        .encode("ASCII", "ignore")
+        .decode("ASCII")
+        .strip()
+        .upper()
+    )
 
-# 2. Carregamento dos Modelos e da Base de Dados (Caminhos Absolutos)
+
+def resolve_path(filename, subfolder):
+    candidates = [
+        os.path.join(BASE_DIR, subfolder, filename),
+        os.path.join(BASE_DIR, filename),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+# ============================================================
+# 2. CARREGAMENTO DOS ARTEFATOS E DADOS (COM CACHE)
+# ============================================================
 @st.cache_resource
 def load_models():
-    rf_path = os.path.join(BASE_DIR, 'modelo_baseline_rf.joblib')
-    if not os.path.exists(rf_path):
-        rf_path = os.path.join(BASE_DIR, 'models', 'modelo_baseline_rf.joblib')
-        
-    le_mun_path = os.path.join(BASE_DIR, 'le_mun.joblib')
-    if not os.path.exists(le_mun_path):
-        le_mun_path = os.path.join(BASE_DIR, 'models', 'le_mun.joblib')
-
-    le_meso_path = os.path.join(BASE_DIR, 'le_meso.joblib')
-    if not os.path.exists(le_meso_path):
-        le_meso_path = os.path.join(BASE_DIR, 'models', 'le_meso.joblib')
-
-    scaler_path = os.path.join(BASE_DIR, 'scaler.joblib')
-    if not os.path.exists(scaler_path):
-        scaler_path = os.path.join(BASE_DIR, 'models', 'scaler.joblib')
-
-    rf_model = joblib.load(rf_path)
-    le_mun = joblib.load(le_mun_path)
-    le_meso = joblib.load(le_meso_path)
-    scaler = joblib.load(scaler_path)
+    rf_model = joblib.load(resolve_path("modelo_v2_rf.joblib", "models"))
+    le_mun = joblib.load(resolve_path("le_mun.joblib", "models"))
+    le_meso = joblib.load(resolve_path("le_meso.joblib", "models"))
+    scaler = joblib.load(resolve_path("scaler_v2.joblib", "models"))
     explainer = shap.TreeExplainer(rf_model)
-    return rf_model, le_mun, le_meso, scaler, explainer
+
+    metrics_path = resolve_path("metrics_sprint4.json", "models")
+    metadata = {}
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+
+    return rf_model, le_mun, le_meso, scaler, explainer, metadata
+
 
 @st.cache_data
 def load_data():
-    csv_path = os.path.join(BASE_DIR, 'base_modelo_violencia_domestica_sc.csv')
-    if not os.path.exists(csv_path):
-        csv_path = os.path.join(BASE_DIR, 'data', 'base_modelo_violencia_domestica_sc.csv')
-    return pd.read_csv(csv_path)
+    csv_path = resolve_path("base_modelo_violencia_domestica_sc.csv", "data")
+    df = pd.read_csv(csv_path)
+    df["periodo"] = pd.to_datetime(df["periodo"])
+    df["municipio_norm"] = df["municipio"].apply(normalize_text)
+    if "mesoregiao" not in df.columns:
+        df["mesoregiao"] = "Não Informada"
+    return df.sort_values(["municipio", "periodo"]).reset_index(drop=True)
+
+
+@st.cache_data
+def build_state_ranking(_df, _rf_model, _le_mun, _le_meso, _scaler, feature_cols):
+    ultimo_periodo = _df["periodo"].max()
+    df_latest = _df[_df["periodo"] == ultimo_periodo].copy()
+
+    valid_muns = set(_le_mun.classes_)
+    valid_mesos = set(_le_meso.classes_)
+    df_latest = df_latest[
+        df_latest["municipio"].isin(valid_muns)
+        & df_latest["mesoregiao"].isin(valid_mesos)
+    ].copy()
+
+    df_latest["municipio_cod"] = _le_mun.transform(df_latest["municipio"])
+    df_latest["mesoregiao_cod"] = _le_meso.transform(df_latest["mesoregiao"])
+
+    X_raw = df_latest[feature_cols].values
+    X_scaled = _scaler.transform(X_raw)
+
+    probs = _rf_model.predict_proba(X_scaled)[:, 1]
+    preds = (probs >= 0.5).astype(int)
+
+    df_latest["prob_escalada"] = probs
+    df_latest["prob_escalada_pct"] = np.round(probs * 100, 1)
+    df_latest["predicao"] = preds
+    df_latest["status"] = np.where(
+        preds == 1, "Alerta Preventivo", "Cenário Estável"
+    )
+
+    return df_latest.sort_values("prob_escalada", ascending=False).reset_index(drop=True), ultimo_periodo
+
 
 try:
-    rf_model, le_mun, le_meso, scaler, explainer = load_models()
+    rf_model, le_mun, le_meso, scaler, explainer, metadata = load_models()
     df_historico = load_data()
 except Exception as e:
-    st.error(f"Erro de infraestrutura ou carregamento de arquivos: Detalhes: {e}")
+    st.error(f"Erro ao carregar artefatos do modelo v2 ou base de dados: {e}")
+    st.info(
+        "Verifique se os arquivos da Sprint 4 (`modelo_v2_rf.joblib`, `le_mun.joblib`, "
+        "`le_meso.joblib`, `scaler_v2.joblib`, `metrics_sprint4.json` em `/models` e "
+        "`base_modelo_violencia_domestica_sc.csv` em `/data`) foram enviados ao repositório."
+    )
     st.stop()
 
-# --- MAPEAMENTO OFICIAL IBGE: MUNICÍPIOS DE SC -> MESORREGIÕES ---
-MAPA_MESORREGIOES = {
-    "Grande Florianópolis": [
-        "AGUAS MORNAS", "ALFREDO WAGNER", "ANGELINA", "ANITAPOLIS", "ANTONIO CARLOS",
-        "BIGUACU", "CANELINHA", "FLORIANOPOLIS", "GAROPABA", "GOVERNADOR CELSO RAMOS",
-        "MAJOR GERCINO", "NOVA TRENTO", "PALHOCA", "PAULO LOPES", "RANCHO QUEIMADO",
-        "SANTO AMARO DA IMPERATRIZ", "SAO BONIFACIO", "SAO JOSE", "SAO PEDRO DE ALCANTARA",
-        "TIJUCAS"
-    ],
-    "Norte Catarinense": [
-        "ARAUQUARI", "BALNEARIO BARRA DO SUL", "BELA VISTA DO TOLDO", "CAMPO ALEGRE",
-        "CANOINHAS", "CORUPA", "GARUVA", "IRINEOPOLIS", "ITAIOPOLIS", "ITARARE",
-        "JARAGUA DO SUL", "JOINVILLE", "MAFRA", "MAJOR VIEIRA", "MASSARANDUBA",
-        "MONTE CASTELO", "PAPANDUVA", "PORTO UNIAO", "RIO NEGRINHO", "SCHROEDER",
-        "SAO BENTO DO SUL", "SAO FRANCISCO DO SUL", "SAO JOAO DO ITAPERIU", "TRES BARRAS"
-    ],
-    "Serrana": [
-        "ABDON BATISTA", "ANITA GARIBALDI", "BOM JARDIM DA SERRA", "BOM RETIRO",
-        "CAMPO BELO DO SUL", "CAPAO ALTO", "CELSO RAMOS", "CORREIA PINTO", "CURITIBANOS",
-        "FREI ROGERIO", "LAGES", "OTACILIO COSTA", "PAINEL", "PALMEIRA", "PONTE ALTA",
-        "PONTE ALTA DO NORTE", "RIO RUFINO", "SANTA CECILIA", "SAO CRISTOVAO DO SUL",
-        "SAO JOAQUIM", "SAO JOSE DO CERRITO", "URUBICI", "URUPEMA", "VARGEM", "VARGEM BONITA"
-    ],
-    "Sul Catarinense": [
-        "ARARANGUA", "BALNEARIO ARROIO DO SILVA", "BALNEARIO GAIVOTA", "BALNEARIO RINCAO",
-        "BRACO DO NORTE", "CAPIVARI DE BAIXO", "COCAL DO SUL", "CRICIUMA", "ERMO",
-        "FORQUILHINHA", "GRAVATAL", "ICARA", "IMARUI", "IMBITUBA", "JACINTO MACHADO",
-        "JAGUARUNA", "LAGUNA", "LAURO MULLER", "MARACAJA", "MELEIRO", "MORRO DA FUMACA",
-        "MORRO GRANDE", "NOVA VENEZA", "ORLEANS", "PASSO DE TORRES", "PEDRAS GRANDES",
-        "PESCARIA BRAVA", "PRAIA GRANDE", "SANGAO", "SANTA ROSA DO SUL", "SAO LUDGERO",
-        "SAO MARTINHO", "SOMBRIO", "TREVISO", "TREZE DE MAIO", "TUBARAO", "TURVO", "URUSSANGA"
-    ],
-    "Vale do Itajaí": [
-        "AGROLANDIA", "AGRONOMICA", "APIUNA", "ATALANTA", "AURORA", "BALNEARIO CAMBORIU",
-        "BALNEARIO PICARRAS", "BLUMENAU", "BOTUVERA", "BRACO DO TROMBETO", "BRACO DO TROMBETAS",
-        "BRUSQUE", "CAMBORIU", "CHAPADAO DO LAGEADO", "DONA EMMA", "GASPAR", "IBIRAMA",
-        "ILHOTA", "INDAIAL", "ITAJAI", "ITAPEMA", "ITUPORANGA", "JOSE BOITEUX", "LAURENTINO",
-        "LONTRAS", "LUIS ALVES", "MIRIM DOCE", "NAVEGANTES", "PENHA", "PETROLANDIA",
-        "POUSO REDONDO", "PRESIDENTE GETULIO", "PRESIDENTE NEREU", "RIO DO CAMPO",
-        "RIO DO OESTE", "RIO DO SUL", "RIO DOS CEDROS", "RODEIO", "SALETE", "SANTA TEREZINHA",
-        "TAIO", "TROMBUDO CENTRAL", "VIDAL RAMOS", "VITOR MEIRELES", "WITMARSUM"
+FEATURES = metadata.get("features", DEFAULT_FEATURES)
+FEATURE_LABELS = metadata.get("feature_labels", DEFAULT_FEATURE_LABELS)
+
+df_ranking, ultimo_periodo = build_state_ranking(
+    df_historico, rf_model, le_mun, le_meso, scaler, FEATURES
+)
+prob_media_estadual = float(df_ranking["prob_escalada"].mean() * 100)
+
+
+# ============================================================
+# 3. CABEÇALHO E NAVEGAÇÃO EM ABAS
+# ============================================================
+st.title("🚨 Previsão de Escalada: Violência Doméstica em Santa Catarina")
+st.markdown(
+    f"Plataforma de apoio à decisão baseada em **Machine Learning (Random Forest v2 + SHAP)** "
+    f"sobre dados integrados da SSP/SC e IBGE (**{df_historico['municipio'].nunique()} municípios**, "
+    f"base atualizada até **{ultimo_periodo.strftime('%m/%Y')}**)."
+)
+
+tab_panorama, tab_municipio, tab_auditoria = st.tabs(
+    [
+        "🗺️ Panorama Estadual (Ranking)",
+        "🔍 Análise Municipal & SHAP",
+        "⚙️ Auditoria & Qualidade (CRISP-ML(Q))",
     ]
-}
+)
 
-def obter_mesoregiao(municipio_str):
-    mun_norm = normalize_text(municipio_str)
-    for regiao, municipios in MAPA_MESORREGIOES.items():
-        if any(normalize_text(m) == mun_norm for m in municipios):
-            return regiao
-    return "Oeste Catarinense"
 
-st.markdown("---")
-st.subheader("📊 Entrada de Variáveis Preditivas")
+# ============================================================
+# ABA 1: PANORAMA ESTADUAL (RANKING DE PRIORIZAÇÃO)
+# ============================================================
+with tab_panorama:
+    st.subheader("Priorização Estadual de Risco para o Mês Subsequente")
 
-# 3. Interface de Usuário
-mapa_municipios = {normalize_text(m): m for m in le_mun.classes_}
-municipios_disponiveis = sorted(list(mapa_municipios.values()))
-
-municipio_selecionado = st.selectbox("Município Alvo:", municipios_disponiveis)
-municipio_norm = normalize_text(municipio_selecionado)
-
-# Filtro no DataFrame
-df_historico['municipio_norm'] = df_historico['municipio'].apply(normalize_text)
-df_mun_atual = df_historico[df_historico['municipio_norm'] == municipio_norm].copy()
-
-if not df_mun_atual.empty:
-    periodo_selecionado = df_mun_atual['periodo'].max()
-    dado_filtrado = df_mun_atual[df_mun_atual['periodo'] == periodo_selecionado]
-    casos_mes_anterior = int(dado_filtrado['ocorrencias'].values[0]) if not dado_filtrado.empty else 10
-    
-    st.info(f"Base para predição: Mês mais recente registrado (**{periodo_selecionado}**). "
-            f"Ocorrências registradas em **{municipio_selecionado}**: **{casos_mes_anterior}** casos.")
-else:
-    periodo_selecionado = "N/A"
-    casos_mes_anterior = 10
-    st.warning(f"Não foram encontrados dados históricos suficientes para **{municipio_selecionado}**. Utilizando valor padrão de 10 ocorrências para a predição.")
-
-# 4. Execução do Algoritmo e Resultados
-if st.button("Executar Algoritmo de Predição", type="primary"):
-    with st.spinner("Processando dados e consultando o modelo Random Forest..."):
-        
-        mesoregiao_exata = obter_mesoregiao(municipio_selecionado)
-
-        for classe_le in le_meso.classes_:
-            if normalize_text(classe_le) == normalize_text(mesoregiao_exata):
-                mesoregiao_exata = classe_le
-                break
-
-        mun_cod = le_mun.transform([municipio_selecionado])[0]
-        meso_cod = le_meso.transform([mesoregiao_exata])[0]
-        
-        X_input = np.array([[mun_cod, meso_cod, casos_mes_anterior]])
-        X_scaled = scaler.transform(X_input)
-        
-        predicao = rf_model.predict(X_scaled)[0]
-        probabilidades = rf_model.predict_proba(X_scaled)[0]
-        confianca = np.max(probabilidades) * 100
-        
-        if not df_mun_atual.empty and len(df_mun_atual) >= 2:
-            df_ord = df_mun_atual.sort_values('periodo')
-            media_historica = df_ord['ocorrencias'].mean()
-            diferenca_media = casos_mes_anterior - media_historica
-            pct_media = (diferenca_media / media_historica * 100) if media_historica > 0 else 0.0
-        else:
-            media_historica = casos_mes_anterior
-            pct_media = 0.0
-
-        st.markdown("---")
-        st.subheader("🔍 Resultado da Avaliação Preditiva")
-        
-        res_col1, res_col2 = st.columns([3, 2])
-        with res_col1:
-            if predicao == 1:
-                st.error(f"**ALERTA PREVENTIVO PARA {municipio_selecionado.upper()}** 📈")
-            else:
-                st.success(f"**CENÁRIO ESTÁVEL PARA {municipio_selecionado.upper()}** 📉")
-                
-        with res_col2:
-            cor_delta = "inverse" if predicao == 1 else "normal"
-            indicador_delta = "Risco de Escalada" if predicao == 1 else "Risco Controlado"
-            st.metric(label="Grau de Confiança (Modelo)", value=f"{confianca:.1f}%", delta=indicador_delta, delta_color=cor_delta)
-
-        st.markdown("### 📄 Diagnóstico")
-        
-        if abs(pct_media) < 5:
-            relacao_media = f"praticamente alinhado à média histórica local ({media_historica:.1f} casos/mês)."
-        elif pct_media > 0:
-            relacao_media = f"**{abs(pct_media):.1f}% acima** da média histórica local ({media_historica:.1f} casos/mês)."
-        else:
-            relacao_media = f"**{abs(pct_media):.1f}% abaixo** da média histórica local ({media_historica:.1f} casos/mês)."
-
-        if predicao == 1:
-            st.markdown(f"""
-            O modelo projeta uma **tendência de alta** nas ocorrências de **{municipio_selecionado}** para o próximo período.
-
-            * **Análise do Volume:** O município registrou **{casos_mes_anterior} ocorrências** no último período, estando {relacao_media}
-            * **Influência Regional:** O município pertence à mesorregião **{mesoregiao_exata}**. A dinâmica e o histórico recente dos municípios desta região contribuem para elevar a probabilidade de risco estimada pelo algoritmo.
-            """)
-        else:
-            st.markdown(f"""
-            O modelo projeta **estabilidade ou redução** nas ocorrências de **{municipio_selecionado}** para o próximo período.
-
-            * **Análise do Volume:** O município registrou **{casos_mes_anterior} ocorrências** no último período, estando {relacao_media}
-            * **Influência Regional:** O município pertence à mesorregião **{mesoregiao_exata}**. O comportamento observado nesta região indica um padrão sob controle, sustentando a projeção de estabilidade.
-            """)
-
-        # 5. Interpretabilidade com SHAP
-        st.markdown("---")
-        st.subheader("🧠 Por que o modelo chegou a esse resultado?")
-        
-        st.markdown("""
-        O gráfico abaixo (*Waterfall SHAP*) explica passo a passo como o algoritmo calculou o risco para este município:
-        
-        * 🔴 **Barras Vermelhas:** Fatores que **AUMENTAM** a chance de tendência de alta.
-        * 🔵 **Barras Azuis:** Fatores que **REDUZEM** a chance de alta.
-        * 📍 **$E[f(X)]$:** Média histórica geral de risco.
-        * 🏁 **$f(X)$:** Probabilidade final calculada para este município.
-        """)
-
-        shap_values = explainer.shap_values(X_scaled)
-
-        if isinstance(shap_values, list):
-            shap_val_target = shap_values[1][0]
-            expected_val = explainer.expected_value[1]
-        else:
-            if len(shap_values.shape) == 3:
-                shap_val_target = shap_values[0, :, 1]
-                expected_val = explainer.expected_value[1]
-            else:
-                shap_val_target = shap_values[0]
-                expected_val = explainer.expected_value
-
-        features = ['Município', 'Mesorregião', 'Ocorrências (Mês Anterior)']
-
-        fig, ax = plt.subplots(figsize=(8, 3))
-        shap.waterfall_plot(
-            shap.Explanation(
-                values=shap_val_target,
-                base_values=expected_val,
-                data=X_input[0],
-                feature_names=features
-            ),
-            show=False
+    col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
+    with col_f1:
+        mesorregioes_disp = sorted(df_ranking["mesoregiao"].unique().tolist())
+        meso_filtro = st.multiselect(
+            "Filtrar por Mesorregião:",
+            options=mesorregioes_disp,
+            default=mesorregioes_disp,
         )
-        st.pyplot(fig)
+    with col_f2:
+        limiar_alerta = st.slider(
+            "Limiar de Alerta (%):",
+            min_value=30,
+            max_value=80,
+            value=50,
+            step=5,
+            help="Ajusta o ponto de corte de probabilidade para classificar um município em alerta preventivo.",
+        )
+    with col_f3:
+        status_filtro = st.selectbox(
+            "Exibir Status:",
+            options=["Todos", "Apenas Alerta Preventivo", "Apenas Cenário Estável"],
+        )
 
-        # 6. Histórico Local
-        st.markdown("---")
-        st.subheader("📈 Contexto Histórico Local")
-        
-        if not df_mun_atual.empty:
-            st.info(f"Série temporal completa de ocorrências registradas para {municipio_selecionado}.")
-            df_grafico = df_mun_atual[['periodo', 'ocorrencias']].set_index('periodo')
-            st.line_chart(df_grafico)
+    df_view = df_ranking[df_ranking["mesoregiao"].isin(meso_filtro)].copy()
+    df_view["status_dinamico"] = np.where(
+        df_view["prob_escalada_pct"] >= limiar_alerta,
+        "Alerta Preventivo",
+        "Cenário Estável",
+    )
+
+    if status_filtro == "Apenas Alerta Preventivo":
+        df_view = df_view[df_view["status_dinamico"] == "Alerta Preventivo"]
+    elif status_filtro == "Apenas Cenário Estável":
+        df_view = df_view[df_view["status_dinamico"] == "Cenário Estável"]
+
+    total_muns = len(df_view)
+    qtd_alerta = int((df_view["status_dinamico"] == "Alerta Preventivo").sum())
+    pct_alerta = (qtd_alerta / total_muns * 100) if total_muns > 0 else 0.0
+    media_prob_view = df_view["prob_escalada_pct"].mean() if total_muns > 0 else 0.0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Municípios Filtrados", f"{total_muns}")
+    k2.metric("Em Alerta Preventivo", f"{qtd_alerta}", f"{pct_alerta:.1f}% do recorte", delta_color="off")
+    k3.metric("Probabilidade Média de Escalada", f"{media_prob_view:.1f}%")
+    k4.metric("Mês de Referência", ultimo_periodo.strftime("%Y-%m"))
+
+    if df_view.empty:
+        st.warning("Nenhum município corresponde aos filtros selecionados.")
+    else:
+        g1, g2 = st.columns([3, 2])
+        with g1:
+            top15 = df_view.head(15).sort_values("prob_escalada_pct", ascending=True)
+            fig_top = px.bar(
+                top15,
+                x="prob_escalada_pct",
+                y="municipio",
+                color="prob_escalada_pct",
+                color_continuous_scale="Reds",
+                orientation="h",
+                hover_data=["mesoregiao", "ocorrencias", "taxa_violencia_100k"],
+                labels={
+                    "prob_escalada_pct": "Probabilidade de Escalada (%)",
+                    "municipio": "Município",
+                    "mesoregiao": "Mesorregião",
+                    "ocorrencias": "Ocorrências no Mês",
+                    "taxa_violencia_100k": "Taxa / 100k Mulheres",
+                },
+                title="Top 15 Municípios com Maior Probabilidade de Escalada",
+            )
+            fig_top.update_layout(coloraxis_showscale=False, height=430, margin=dict(l=10, r=10, t=45, b=10))
+            st.plotly_chart(fig_top, use_container_width=True)
+
+        with g2:
+            resumo_meso = (
+                df_view.groupby("mesoregiao", as_index=False)
+                .agg(
+                    municipios=("municipio", "count"),
+                    em_alerta=("status_dinamico", lambda s: (s == "Alerta Preventivo").sum()),
+                    prob_media=("prob_escalada_pct", "mean"),
+                )
+            )
+            resumo_meso["pct_alerta"] = np.round(
+                resumo_meso["em_alerta"] / resumo_meso["municipios"] * 100, 1
+            )
+            resumo_meso = resumo_meso.sort_values("pct_alerta", ascending=True)
+
+            fig_meso = px.bar(
+                resumo_meso,
+                x="pct_alerta",
+                y="mesoregiao",
+                orientation="h",
+                text="pct_alerta",
+                color="prob_media",
+                color_continuous_scale="YlOrRd",
+                labels={
+                    "pct_alerta": "% de Municípios em Alerta",
+                    "mesoregiao": "Mesorregião",
+                    "prob_media": "Prob. Média (%)",
+                },
+                title="Concentração de Alertas por Mesorregião",
+            )
+            fig_meso.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+            fig_meso.update_layout(height=430, margin=dict(l=10, r=25, t=45, b=10))
+            st.plotly_chart(fig_meso, use_container_width=True)
+
+        st.markdown("### 📋 Tabela Completa de Priorização Municipal")
+        tabela_export = df_view[
+            [
+                "municipio",
+                "mesoregiao",
+                "status_dinamico",
+                "prob_escalada_pct",
+                "ocorrencias",
+                "taxa_violencia_100k",
+                "media_3_meses",
+                "populacao_feminina",
+            ]
+        ].rename(
+            columns={
+                "municipio": "Município",
+                "mesoregiao": "Mesorregião",
+                "status_dinamico": "Classificação",
+                "prob_escalada_pct": "Prob. Escalada (%)",
+                "ocorrencias": "Ocorrências (Atual)",
+                "taxa_violencia_100k": "Taxa / 100k (Atual)",
+                "media_3_meses": "Média Móvel 3m (/100k)",
+                "populacao_feminina": "Pop. Feminina",
+            }
+        )
+        tabela_export["Taxa / 100k (Atual)"] = tabela_export["Taxa / 100k (Atual)"].round(1)
+        tabela_export["Média Móvel 3m (/100k)"] = tabela_export["Média Móvel 3m (/100k)"].round(1)
+
+        st.dataframe(tabela_export, use_container_width=True, hide_index=True)
+
+        csv_bytes = tabela_export.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="📥 Baixar Ranking Filtrado (CSV)",
+            data=csv_bytes,
+            file_name=f"ranking_risco_sc_{ultimo_periodo.strftime('%Y_%m')}.csv",
+            mime="text/csv",
+        )
+
+
+# ============================================================
+# ABA 2: ANÁLISE MUNICIPAL, SIMULADOR WHAT-IF & SHAP
+# ============================================================
+with tab_municipio:
+    st.subheader("Consulta Individual, Simulação de Cenários e Explicabilidade (XAI)")
+
+    municipios_disponiveis = sorted(df_ranking["municipio"].unique().tolist())
+    municipio_selecionado = st.selectbox(
+        "Selecione o Município Alvo:",
+        options=municipios_disponiveis,
+        index=municipios_disponiveis.index("CHAPECO") if "CHAPECO" in municipios_disponiveis else 0,
+    )
+
+    df_mun_hist = df_historico[df_historico["municipio"] == municipio_selecionado].sort_values("periodo")
+    registro_base = df_mun_hist.iloc[-1].copy()
+    mesorregiao_real = registro_base["mesoregiao"]
+    periodo_ref = registro_base["periodo"]
+
+    st.info(
+        f"**{municipio_selecionado}** ({mesorregiao_real}) — Referência mais recente: "
+        f"**{periodo_ref.strftime('%m/%Y')}** | Ocorrências registradas: **{int(registro_base['ocorrencias'])}** | "
+        f"Taxa: **{registro_base['taxa_violencia_100k']:.1f} casos / 100 mil mulheres** | "
+        f"População feminina: **{int(registro_base['populacao_feminina']):,}**."
+    )
+
+    # Simulador What-if (Melhoria centrada no gestor)
+    usar_simulacao = False
+    ocorrencias_sim = int(registro_base["ocorrencias"])
+    feminicidios_sim = int(registro_base["feminicidios"])
+
+    with st.expander("🧪 Simulador de Cenário (What-if) — Testar impacto de variações no mês atual"):
+        usar_simulacao = st.checkbox(
+            "Ativar simulação manual (altera os valores do mês atual e recalcula taxas e SHAP em tempo real)"
+        )
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            ocorrencias_sim = st.number_input(
+                "Ocorrências simuladas no mês atual:",
+                min_value=0,
+                max_value=5000,
+                value=int(registro_base["ocorrencias"]),
+                step=1,
+                disabled=not usar_simulacao,
+            )
+        with sc2:
+            feminicidios_sim = st.number_input(
+                "Feminicídios simulados no mês atual:",
+                min_value=0,
+                max_value=50,
+                value=int(registro_base["feminicidios"]),
+                step=1,
+                disabled=not usar_simulacao,
+            )
+
+    # Monta vetor de entrada (real ou simulado)
+    entrada = registro_base.copy()
+    entrada["municipio_cod"] = le_mun.transform([municipio_selecionado])[0]
+    entrada["mesoregiao_cod"] = le_meso.transform([mesorregiao_real])[0]
+
+    if usar_simulacao:
+        pop_fem = float(entrada["populacao_feminina"])
+        taxa_sim = (ocorrencias_sim / pop_fem) * 100000.0 if pop_fem > 0 else 0.0
+        entrada["ocorrencias"] = float(ocorrencias_sim)
+        entrada["taxa_violencia_100k"] = taxa_sim
+        entrada["desvio_media_3m"] = taxa_sim - float(entrada["media_3_meses"])
+        entrada["delta_ultimo_mes"] = taxa_sim - float(entrada["taxa_violencia_mes_anterior"])
+        entrada["feminicidios"] = float(feminicidios_sim)
+
+    X_input = np.array([[float(entrada[col]) for col in FEATURES]])
+    X_scaled = scaler.transform(X_input)
+
+    prob_alta = float(rf_model.predict_proba(X_scaled)[0, 1])
+    predicao = 1 if prob_alta >= 0.5 else 0
+    prob_pct = prob_alta * 100.0
+    diff_estadual = prob_pct - prob_media_estadual
+
+    media_hist_casos = float(df_mun_hist["ocorrencias"].mean())
+    casos_atual = int(entrada["ocorrencias"])
+    pct_media = ((casos_atual - media_hist_casos) / media_hist_casos * 100) if media_hist_casos > 0 else 0.0
+
+    st.markdown("---")
+    res1, res2, res3 = st.columns([2.5, 1.5, 1.5])
+    with res1:
+        tag_sim = " (CENÁRIO SIMULADO)" if usar_simulacao else ""
+        if predicao == 1:
+            st.error(f"### 📈 ALERTA PREVENTIVO — {municipio_selecionado}{tag_sim}")
         else:
-            st.warning(f"Não foram encontrados registros históricos suficientes para {municipio_selecionado}.")
+            st.success(f"### 📉 CENÁRIO ESTÁVEL — {municipio_selecionado}{tag_sim}")
+    with res2:
+        st.metric(
+            label="Probabilidade de Escalada",
+            value=f"{prob_pct:.1f}%",
+            delta=f"{diff_estadual:+.1f} p.p. vs média SC",
+            delta_color="inverse",
+        )
+    with res3:
+        st.metric(
+            label="Taxa Atual (/100k mulheres)",
+            value=f"{entrada['taxa_violencia_100k']:.1f}",
+            delta=f"{entrada['desvio_media_3m']:+.1f} vs média 3m",
+            delta_color="inverse",
+        )
 
-        # 7. Melhoria da Sprint 4: Nota de Auditoria do Modelo (Validação de Robustez)
+    # Diagnóstico Textual Automatizado
+    if abs(pct_media) < 5:
+        rel_media = f"praticamente alinhado à média histórica local ({media_hist_casos:.1f} casos/mês)."
+    elif pct_media > 0:
+        rel_media = f"**{abs(pct_media):.1f}% acima** da média histórica local ({media_hist_casos:.1f} casos/mês)."
+    else:
+        rel_media = f"**{abs(pct_media):.1f}% abaixo** da média histórica local ({media_hist_casos:.1f} casos/mês)."
+
+    st.markdown("#### 📄 Diagnóstico Automatizado")
+    if predicao == 1:
+        st.markdown(
+            f"O modelo projeta **tendência de aumento** na taxa de violência doméstica de **{municipio_selecionado}** para o próximo mês.\n"
+            f"* **Volume e Taxa Local:** Com **{casos_atual} ocorrências** ({rel_media}), a taxa atual está em "
+            f"**{entrada['taxa_violencia_100k']:.1f}/100k** frente à média móvel trimestral de **{entrada['media_3_meses']:.1f}/100k**.\n"
+            f"* **Contexto Regional e Sazonal:** A mesorregião **{mesorregiao_real}** combinada ao padrão sazonal do período "
+            f"e às defasagens históricas elevou o risco acima do limiar de alerta (50%)."
+        )
+    else:
+        st.markdown(
+            f"O modelo projeta **estabilidade ou retração** na taxa de violência doméstica de **{municipio_selecionado}** para o próximo mês.\n"
+            f"* **Volume e Taxa Local:** Com **{casos_atual} ocorrências** ({rel_media}), a taxa atual está em "
+            f"**{entrada['taxa_violencia_100k']:.1f}/100k** frente à média móvel trimestral de **{entrada['media_3_meses']:.1f}/100k**.\n"
+            f"* **Contexto Regional e Sazonal:** Os indicadores históricos recentes e a dinâmica da mesorregião **{mesorregiao_real}** "
+            f"não sinalizam escalada adicional para o período subsequente."
+        )
+
+    # Explicabilidade SHAP (Waterfall)
+    st.markdown("---")
+    st.markdown("#### 🧠 Explicabilidade da Decisão (Waterfall SHAP — Top 10 Fatores)")
+    st.caption(
+        "Barras vermelhas aumentam a probabilidade de escalada; barras azuis reduzem. "
+        "E[f(X)] é a probabilidade base do modelo e f(x) é a probabilidade final calculada para este município."
+    )
+
+    shap_values = explainer.shap_values(X_scaled)
+    if isinstance(shap_values, list):
+        shap_val_target = np.array(shap_values[1][0], dtype=float)
+        expected_val = float(explainer.expected_value[1])
+    elif len(np.shape(shap_values)) == 3:
+        shap_val_target = np.array(shap_values[0, :, 1], dtype=float)
+        expected_val = float(explainer.expected_value[1])
+    else:
+        shap_val_target = np.array(shap_values[0], dtype=float)
+        expected_val = float(
+            explainer.expected_value[0]
+            if isinstance(explainer.expected_value, (list, np.ndarray))
+            else explainer.expected_value
+        )
+
+    # Evita zero negativo (-0.0) por precisão de ponto flutuante
+    shap_val_target = np.where(np.abs(shap_val_target) < 1e-6, 0.0, shap_val_target)
+
+    fig_shap, _ = plt.subplots(figsize=(9, 4.8))
+    shap.waterfall_plot(
+        shap.Explanation(
+            values=shap_val_target,
+            base_values=expected_val,
+            data=np.round(X_input[0], 2),
+            feature_names=FEATURE_LABELS,
+        ),
+        max_display=10,
+        show=False,
+    )
+    plt.tight_layout()
+    st.pyplot(fig_shap)
+    plt.close(fig_shap)
+
+    # Série Histórica Interativa (Plotly)
+    st.markdown("---")
+    st.markdown("#### 📈 Contexto Histórico Local (2020–2026)")
+    metrica_graf = st.radio(
+        "Métrica da Série Temporal:",
+        options=["Ocorrências Absolutas", "Taxa por 100 mil Mulheres"],
+        horizontal=True,
+    )
+    col_y = "ocorrencias" if metrica_graf == "Ocorrências Absolutas" else "taxa_violencia_100k"
+    media_y = float(df_mun_hist[col_y].mean())
+
+    fig_hist = go.Figure()
+    fig_hist.add_trace(
+        go.Scatter(
+            x=df_mun_hist["periodo"],
+            y=df_mun_hist[col_y],
+            mode="lines+markers",
+            name=metrica_graf,
+            line=dict(color="#1f77b4", width=2),
+            marker=dict(size=5),
+        )
+    )
+    fig_hist.add_hline(
+        y=media_y,
+        line_dash="dash",
+        line_color="#d62728",
+        annotation_text=f"Média Histórica: {media_y:.1f}",
+        annotation_position="top right",
+    )
+    fig_hist.update_layout(
+        title=f"Série Temporal — {municipio_selecionado} ({metrica_graf})",
+        xaxis_title="Período",
+        yaxis_title=metrica_graf,
+        hovermode="x unified",
+        height=380,
+        margin=dict(l=10, r=10, t=45, b=10),
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+
+# ============================================================
+# ABA 3: AUDITORIA E QUALIDADE DO MODELO (CRISP-ML(Q))
+# ============================================================
+with tab_auditoria:
+    st.subheader("Auditoria Técnica, Evidência de Evolução (v1 → v2) e Governança CRISP-ML(Q)")
+
+    if not metadata or "benchmark" not in metadata:
+        st.warning("Arquivo `metrics_sprint4.json` não encontrado em `/models`.")
+    else:
+        bench = pd.DataFrame(metadata["benchmark"])
+        v1_rf = bench[bench["modelo"] == "v1_Random_Forest_Baseline"].iloc[0]
+        v2_rf = bench[bench["modelo"] == "v2_Random_Forest_Tunado"].iloc[0]
+
+        st.markdown("#### 🚀 Impacto Quantitativo da Evolução (Sprint 2 → Sprint 4)")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            "Acurácia (Split Temporal)",
+            f"{v2_rf['acuracia']*100:.2f}%",
+            f"{(v2_rf['acuracia'] - v1_rf['acuracia'])*100:+.2f} p.p.",
+        )
+        m2.metric(
+            "Recall (Sensibilidade)",
+            f"{v2_rf['recall']*100:.2f}%",
+            f"{(v2_rf['recall'] - v1_rf['recall'])*100:+.2f} p.p.",
+        )
+        m3.metric(
+            "F1-Score (Classe Positiva)",
+            f"{v2_rf['f1_score']:.4f}",
+            f"{(v2_rf['f1_score'] - v1_rf['f1_score']):+.4f}",
+        )
+        m4.metric(
+            "ROC-AUC",
+            f"{v2_rf['roc_auc']:.4f}",
+            f"{(v2_rf['roc_auc'] - v1_rf['roc_auc']):+.4f}",
+        )
+
         st.markdown("---")
-        st.subheader("⚙️ Auditoria e Qualidade do Modelo")
-        st.success("✔ Modelo validado via framework CRISP-ML(Q) com estabilidade garantida em ambiente de produção (Streamlit Cloud).")
+        c_bench, c_cm = st.columns([3, 2])
+
+        with c_bench:
+            st.markdown("#### 📊 Benchmark Completo (Validação Temporal Estrita)")
+            bench_plot = bench[
+                bench["modelo"].isin(["v1_Random_Forest_Baseline", "v2_Random_Forest_Tunado"])
+            ].melt(
+                id_vars="modelo",
+                value_vars=["acuracia", "precisao", "recall", "f1_score", "roc_auc"],
+                var_name="Métrica",
+                value_name="Valor",
+            )
+            bench_plot["modelo"] = bench_plot["modelo"].replace(
+                {
+                    "v1_Random_Forest_Baseline": "v1 Baseline (Sprint 2 — 3 features)",
+                    "v2_Random_Forest_Tunado": "v2 Evolução (Sprint 4 — 16 features)",
+                }
+            )
+            fig_comp = px.bar(
+                bench_plot,
+                x="Métrica",
+                y="Valor",
+                color="modelo",
+                barmode="group",
+                text_auto=".3f",
+                color_discrete_sequence=["#95a5a6", "#1f77b4"],
+                title="Evolução do Random Forest: Baseline v1 vs. Modelo v2",
+            )
+            fig_comp.update_layout(yaxis_range=[0, 1], height=370, legend_title="")
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        with c_cm:
+            st.markdown("#### 🎯 Matriz de Confusão (Produção v2)")
+            cm = np.array(v2_rf["matriz_confusao"])
+            fig_cm = px.imshow(
+                cm,
+                text_auto=True,
+                color_continuous_scale="Blues",
+                x=["Previsto: Estável (0)", "Previsto: Escalada (1)"],
+                y=["Real: Estável (0)", "Real: Escalada (1)"],
+                title=f"Partição de Teste ({metadata.get('n_registros_teste', 0):,} amostras)",
+            )
+            fig_cm.update_layout(height=370, coloraxis_showscale=False)
+            st.plotly_chart(fig_cm, use_container_width=True)
+
+        st.markdown("#### 📋 Tabela Comparativa de Todos os Modelos Avaliados")
+        tabela_bench = bench[["modelo", "acuracia", "precisao", "recall", "f1_score", "roc_auc"]].rename(
+            columns={
+                "modelo": "Modelo",
+                "acuracia": "Acurácia",
+                "precisao": "Precisão",
+                "recall": "Recall",
+                "f1_score": "F1-Score",
+                "roc_auc": "ROC-AUC",
+            }
+        )
+        st.dataframe(tabela_bench, use_container_width=True, hide_index=True)
+
+        # Importância Global das Variáveis
+        if "feature_importances" in metadata:
+            st.markdown("#### 🔎 Importância Global das Variáveis (Feature Importance — RF v2)")
+            df_imp = pd.DataFrame(
+                list(metadata["feature_importances"].items()),
+                columns=["Atributo", "Importância"],
+            ).sort_values("Importância", ascending=True)
+            fig_imp = px.bar(
+                df_imp,
+                x="Importância",
+                y="Atributo",
+                orientation="h",
+                text_auto=".3f",
+                color="Importância",
+                color_continuous_scale="Teal",
+            )
+            fig_imp.update_layout(height=460, coloraxis_showscale=False, margin=dict(l=10, r=20, t=20, b=10))
+            st.plotly_chart(fig_imp, use_container_width=True)
+
+        # Bloco de Governança CRISP-ML(Q)
+        st.markdown("#### 🛡️ Governança e Monitoramento (CRISP-ML(Q))")
+        p_tr = metadata.get("periodo_treino", ["N/A", "N/A"])
+        p_te = metadata.get("periodo_teste", ["N/A", "N/A"])
+        st.success(
+            f"**Versão em Produção:** `{metadata.get('versao', 'v2.0-sprint4')}` (`{metadata.get('modelo_producao')}`) | "
+            f"**Treino:** {p_tr[0]} a {p_tr[1]} ({metadata.get('n_registros_treino', 0):,} registros) | "
+            f"**Teste Temporal:** {p_te[0]} a {p_te[1]} ({metadata.get('n_registros_teste', 0):,} registros) | "
+            f"**Cobertura:** {metadata.get('n_municipios', 295)} municípios de SC."
+        )
