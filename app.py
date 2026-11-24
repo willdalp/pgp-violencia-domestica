@@ -614,7 +614,7 @@ with tab_auditoria:
             st.plotly_chart(fig_comp, use_container_width=True)
 
         with c_cm:
-            st.markdown("#### 🎯 Matriz de Confusão (Produção v2)")
+            st.markdown("#### 🎯 Matriz de Confusão")
             cm = np.array(v2_rf["matriz_confusao"])
             fig_cm = px.imshow(
                 cm,
