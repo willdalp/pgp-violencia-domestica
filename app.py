@@ -172,7 +172,7 @@ prob_media_estadual = float(df_ranking["prob_escalada"].mean() * 100)
 # ============================================================
 st.title("🚨 Previsão de Escalada: Violência Doméstica em Santa Catarina")
 st.markdown(
-    f"Plataforma de apoio à decisão baseada em **Machine Learning (Random Forest v2 + SHAP)** "
+    f"Plataforma de apoio à decisão baseada em **Machine Learning (Random Forest + SHAP)** "
     f"sobre dados integrados da SSP/SC e IBGE (**{df_historico['municipio'].nunique()} municípios**, "
     f"base atualizada até **{ultimo_periodo.strftime('%m/%Y')}**)."
 )
