@@ -549,7 +549,7 @@ with tab_municipio:
 # ABA 3: AUDITORIA E QUALIDADE DO MODELO (CRISP-ML(Q))
 # ============================================================
 with tab_auditoria:
-    st.subheader("Auditoria Técnica, Evidência de Evolução (v1 → v2) e Governança CRISP-ML(Q)")
+    st.subheader("Auditoria Técnica, Evidência de Evolução e Governança CRISP-ML(Q)")
 
     if not metadata or "benchmark" not in metadata:
         st.warning("Arquivo `metrics_sprint4.json` não encontrado em `/models`.")
