@@ -558,7 +558,7 @@ with tab_auditoria:
         v1_rf = bench[bench["modelo"] == "v1_Random_Forest_Baseline"].iloc[0]
         v2_rf = bench[bench["modelo"] == "v2_Random_Forest_Tunado"].iloc[0]
 
-        st.markdown("#### 🚀 Impacto Quantitativo da Evolução (Sprint 2 → Sprint 4)")
+        st.markdown("#### 🚀 Impacto Quantitativo da Evolução")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric(
             "Acurácia (Split Temporal)",
