@@ -642,7 +642,7 @@ with tab_auditoria:
 
         # Importância Global das Variáveis
         if "feature_importances" in metadata:
-            st.markdown("#### 🔎 Importância Global das Variáveis (Feature Importance — RF v2)")
+            st.markdown("#### 🔎 Importância Global das Variáveis (Feature Importance")
             df_imp = pd.DataFrame(
                 list(metadata["feature_importances"].items()),
                 columns=["Atributo", "Importância"],
